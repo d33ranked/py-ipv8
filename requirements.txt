@@ -1,4 +1,4 @@
-cryptography
+cryptography==46.0.0
 libnacl
 aiohttp
 aiohttp_apispec>=3.0.0b1
