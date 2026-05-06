@@ -17,53 +17,24 @@ REPO_LINK = "https://github.com/d33ranked/py-ipv8"
 UNI_EMAIL = "danilvorotilov@tudelft.nl"
 SERVER_PUB_KEY = "4c69624e61434c504b3a86b23934a28d669c390e2d1fc0b0870706c4591cc0cb178bc5a811da6d87d27ef319b2638ef60cc8d119724f4c53a1ebfad919c3ac4136c501ce5c09364e0ebb"
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY)).hexdigest()
-COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
+COMMUNITY_ID = "2c1cc6e35ff484f99ebdfb6108477783c0102881"
 DIFFICULTY = bytes.fromhex("0000000f" + "f" * 56)
 
-MEMBER_KEYS = {
-    "1": "",
-    "2": "",
-    "3": ""
-}
 
-
+PEDRO = "WrK1wzoSk2lrmKAnQymmAI4krMc"
 
 
 @vp_compile
-class RegistrationRequest(VariablePayload):
+class SubmissionMessage(VariablePayload):
     msg_id=1
-    format_list = ["varlenH", "varlenH", "varlenH"]
-    names = ["member1_key", "member2_key", "member3_key"]
+    format_list = ["varlenHutf8", "varlenHutf8", "q"]
+    names = ["email", "github_url", "nonce"]
 
 @vp_compile
-class RegistrationResponse(VariablePayload):
+class ServerResponse(VariablePayload):
     msg_id=2
-    format_list = ["?", "varlenHutf8", "varlenHutf8" ]
-    names = ["success", "group_id", "message"]
-
-@vp_compile
-class ChallangeRequest(VariablePayload):
-    msg_id=3
-    format_list = ["varlenHutf8"]
-    names = ["group_id"]
-
-@vp_compile
-class ChallangeResponse(VariablePayload):
-    msg_id=4
-    format_list = ["varlenH", "q", "d" ]
-    names = ["nonce", "round_number", "deadline"]
-
-@vp_compile
-class BundleSubmission(VariablePayload):
-    msg_id=5
-    format_list = ["varlenHutf8", "q", "sig1", "sig2", "sig3"]
-    names = ["group_id", "round_number", "varlenH", "varlenH", "varlenH"]
-
-@vp_compile
-class RoundResult(VariablePayload):
-    msg_id=6
-    format_list = ["?", "q", "q", "varlenHutf8"]
-    names = ["success", "round_number", "rounds_completed", "message"]
+    format_list = ["?", "varlenHutf8"]
+    names = ["success", "message"]
 
 class SubmissionCommunity(Community, PeerObserver):
     # community_id
@@ -72,11 +43,8 @@ class SubmissionCommunity(Community, PeerObserver):
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
         # Register the handler for the server's response
-       
-        self.add_message_handler(RegistrationResponse, self.on_registration_response)
-        self.add_message_handler(ChallangeResponse, self.on_challange_response)
-        self.add_message_handler(RoundResult, self.on_round_result)
-        
+        self.add_message_handler(SubmissionMessage, self.on_request)
+        self.add_message_handler(ServerResponse, self.on_response)
 
 
         
@@ -87,12 +55,34 @@ class SubmissionCommunity(Community, PeerObserver):
     def on_peer_removed(self, peer) -> None:
         print(f"peer {peer} left")
 
+    def spam_peer(self, peer):
+        print("SPAMMING PEDRO")
+        self.ez_send(peer, ServerResponse(True, "YOU JUST WON $100000000000000"))
 
     def started(self) -> None:
         print("joining community")
         print("starting a peer listener")
         self.network.add_peer_observer(self)
 
+
+           
+    @lazy_wrapper(SubmissionMessage)
+    def on_request(self, peer, payload:SubmissionMessage) -> None:
+        print(f"peer {peer} is submitting {payload}")
+
+        print("Their submission")
+        print("email:", payload.email)
+        print("github:", payload.github_url)
+        print("nonce:", payload.nonce)
+        self.ez_send(peer, ServerResponse(False, "Bro, I am not the server, but nice try :)"))
+    
+    @lazy_wrapper(ServerResponse)
+    def on_response(self, peer, payload:ServerResponse) -> None:
+        print("success: ", payload.success)
+        print(peer, "responsed to us with ", payload.message)
+
+    def polling_peers(self):
+        print(self.get_peers())
 
 
 
