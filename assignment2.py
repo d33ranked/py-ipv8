@@ -109,10 +109,6 @@ class SubmissionCommunity(Community, PeerObserver):
         pass
 
 
-    
-
-
-
 
 async def start_communities():
     builder = ConfigBuilder().clear_keys().clear_overlays()
