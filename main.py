@@ -30,6 +30,12 @@ COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
 REPLICATION_COMMUNITY_ID = "0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF"
 
 
+PUBLIC_KEYS = {
+    "1": "4c69624e61434c504b3ab61e37a8692d6daa52ffadd042aa7b271121397fb2183b0690e3f29eb70d535ab3a5844182e0193bbda94b4007be5cc0f96aeadd130c6e48542c0109e5f18803",
+    "2": "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848",
+    "3": "4c69624e61434c504b3af9e8ecfcb5968c5438c65adf621afcb336895329da741ef0e1ff846db37f3a1dd4188afcad7d8f8a890571930a4bb7b982904911437c2aba97922746c5fdb176"
+}
+
 MEMBER_KEYS = {
     "4c69624e61434c504b3ab61e37a8692d6daa52ffadd042aa7b271121397fb2183b0690e3f29eb70d535ab3a5844182e0193bbda94b4007be5cc0f96aeadd130c6e48542c0109e5f18803": "1",
     "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848": "2",
@@ -43,6 +49,7 @@ IS_LEADER = True
 global to_send
 global group_id
 global solution_dict
+global server_peer
 solution_dict = dict()
 global round_nr
 round_nr = 1
@@ -106,15 +113,17 @@ class SubmissionCommunity(Community, PeerObserver):
     def started(self) -> None:
         print("joining community")
         print("starting a peer listener")
+        print("my key", self.my_peer.public_key.key_to_bin().hex())
+
         self.network.add_peer_observer(self)
 
-        print("my key", self.my_peer.public_key.key_to_bin().hex())
+        
         
         
 
     # Callbacks
     def check_solutions(self):
-        global group_id, solution_dict, round_nr, to_send
+        global group_id, solution_dict, round_nr, to_send, server_peer
         ids = []
         sum = 0
         for key in list(solution_dict.keys()):
@@ -144,17 +153,26 @@ class SubmissionCommunity(Community, PeerObserver):
             sig3
         )
 
+        if not server_peer:
+            print("[WARNING] server was never found as a peer")
+
+        server_peer.ez_send(to_send)
+
+
+
+
 
 
     def on_peer_added(self, peer):
+        global server_peer
         print(f"FOUND PEER: {peer}")
         print(f"-> mid: {peer.mid.hex()}")
         print(f"-> pkeybin: {peer.public_key.key_to_bin().hex()}")
 
         if peer.mid == SERVER_PUB_KEY_SHA1 or peer.public_key.key_to_bin() == bytes.fromhex(SERVER_PUB_KEY):
             print("FOUND SERVER, SENDING REGISTRATION REQUEST")
-            p_keys = MEMBER_KEYS.keys()
-            self.ez_send(peer, RegistrationRequest(p_keys[0], p_keys[1], p_keys[2]))
+            server_peer = peer
+            self.ez_send(peer, RegistrationRequest(PUBLIC_KEYS["1"], PUBLIC_KEYS["2"], PUBLIC_KEYS["3"]))
     
 
     def on_peer_removed(self, peer) -> None:
@@ -166,13 +184,14 @@ class SubmissionCommunity(Community, PeerObserver):
         print("success", payload.success)
         print("msg", payload.message)
         group_id = payload.group_id
-        
-    # TODO: implement this, wait until to_send: BundleSubmission variable is initialized 
-    # and send the bundle response to server
+
     @lazy_wrapper(ChallangeResponse)
     def on_challange_response(self, peer, payload:ChallangeResponse):
        
-        global round_nr
+        global round_nr, solution_dict
+        my_submition_id = MEMBER_KEYS[self.my_peer.mid]
+        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
+        solution_dict[my_submition_id + "_" + round_nr]
         
 
         
