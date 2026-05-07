@@ -21,6 +21,9 @@ from ipv8_service import IPv8
 from ipv8.keyvault.crypto import default_eccrypto
 from ipv8.keyvault.keys import PrivateKey
 
+#CHANGE THIS TO YOUR OWN EMAIL
+UNI_EMAIL = "danilvorotilov@tudelft.nl"
+
 SERVER_PUB_KEY = "4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1bd4350ffde518068a0d246344b10d0d8c355fd0d76873e7d7f7838f3715e025af08f791324495e083331ce6"
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
 COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
@@ -33,10 +36,11 @@ MEMBER_KEYS = {
     "3": "4c69624e61434c504b3af9e8ecfcb5968c5438c65adf621afcb336895329da741ef0e1ff846db37f3a1dd4188afcad7d8f8a890571930a4bb7b982904911437c2aba97922746c5fdb176"
 }
 
-# Consts for replication
 LASTSENT = "_lastsent"
 
 IS_LEADER = True
+
+
 
 
 @vp_compile
