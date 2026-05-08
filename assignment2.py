@@ -29,7 +29,7 @@ SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
 COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
 REPLICATION_COMMUNITY_ID = "0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF"
 
-
+LEADER_ID = "1"
 PUBLIC_KEYS = {
     "1": "4c69624e61434c504b3ab61e37a8692d6daa52ffadd042aa7b271121397fb2183b0690e3f29eb70d535ab3a5844182e0193bbda94b4007be5cc0f96aeadd130c6e48542c0109e5f18803",
     "2": "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848",
@@ -43,16 +43,19 @@ MEMBER_KEYS = {
 }
 
 LASTSENT = "_lastsent"
-IS_LEADER = True
 
 # Global variables
 global to_send
 global group_id
 global solution_dict
 global server_peer
-solution_dict = dict()
 global round_nr
+global peers_connected
+
+
+solution_dict = dict()
 round_nr = 1
+peers_connected = False
 
 
 
@@ -111,17 +114,21 @@ class SubmissionCommunity(Community, PeerObserver):
 
         
     def started(self) -> None:
-        print("joining community")
+        global peers_connected
+
+        while not peers_connected:
+            time.sleep(1.0)
+        print("starting submition community")
         print("starting a peer listener")
         print("my key", self.my_peer.public_key.key_to_bin().hex())
-
         self.network.add_peer_observer(self)
 
         
         
         
-
-    # Callbacks
+    # --------------------
+    # ------ Tasks -------
+    # --------------------
     def check_solutions(self):
         global group_id, solution_dict, round_nr, to_send, server_peer
         ids = []
@@ -162,21 +169,26 @@ class SubmissionCommunity(Community, PeerObserver):
 
 
 
-
+    # --------------------
+    # ---- Callbacks -----
+    # --------------------
     def on_peer_added(self, peer):
         global server_peer
         print(f"FOUND PEER: {peer}")
         print(f"-> mid: {peer.mid.hex()}")
         print(f"-> pkeybin: {peer.public_key.key_to_bin().hex()}")
 
-        if peer.mid == SERVER_PUB_KEY_SHA1 or peer.public_key.key_to_bin() == bytes.fromhex(SERVER_PUB_KEY):
-            print("FOUND SERVER, SENDING REGISTRATION REQUEST")
-            server_peer = peer
-            self.ez_send(peer, RegistrationRequest(
-                bytes.fromhex(PUBLIC_KEYS["1"]), 
-                bytes.fromhex(PUBLIC_KEYS["2"]), 
-                bytes.fromhex(PUBLIC_KEYS["3"])
-            ))    
+        if not is_server(peer):
+            return
+        
+
+        print("FOUND SERVER, SENDING REGISTRATION REQUEST")
+        server_peer = peer
+        self.ez_send(peer, RegistrationRequest(
+            bytes.fromhex(PUBLIC_KEYS["1"]), 
+            bytes.fromhex(PUBLIC_KEYS["2"]), 
+            bytes.fromhex(PUBLIC_KEYS["3"])
+        ))    
 
     def on_peer_removed(self, peer) -> None:
         print(f"peer {peer} left")
@@ -184,20 +196,38 @@ class SubmissionCommunity(Community, PeerObserver):
     @lazy_wrapper(RegistrationResponse)
     def on_registration_response(self, peer, payload:RegistrationResponse):
         global group_id
+        if not is_server(peer):
+            return
+        group_id = payload.group_id
         print("success", payload.success)
         print("msg", payload.message)
-        group_id = payload.group_id
+        print("group_id: ", payload.group_id)
+        
+        
 
     @lazy_wrapper(ChallangeResponse)
     def on_challange_response(self, peer, payload:ChallangeResponse):
-       
         global round_nr, solution_dict
+        if not is_server(peer):
+            return
+       
+        
         my_submition_id = MEMBER_KEYS[self.my_peer.mid]
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
         solution_dict[my_submition_id + "_" + round_nr] = signed_nonce
 
+    @lazy_wrapper(RoundResult)
     def on_round_result(self, peer):
-        pass
+        global round_nr
+        if not is_server(peer):
+            return 
+        
+        if not peer.payload.success:
+            print("[SERVER]")
+
+
+def is_server(peer):
+    return peer.mid == SERVER_PUB_KEY_SHA1
 
 
 
@@ -223,7 +253,7 @@ class PingCache(RandomNumberCacheWithName):
         self.value = value
         self.name = name
 
-class ReplicationCommunity(Community):
+class ReplicationCommunity(Community, PeerObserver):
 
     community_id = bytes.fromhex(REPLICATION_COMMUNITY_ID)
 
@@ -264,21 +294,23 @@ class ReplicationCommunity(Community):
     # after timeout remove peer
     def on_ping_timeout(self, peer):
         self.get_peers().remove(peer)
-    def ez_send(self, peer: Peer, *payloads: Payload, sig: bool = True) -> None:
-        for payload in payloads:
-            # Only support VariablePayload convertion for now
-            # TODO: Add support for other types of payloads.
-            # They would need to be turned into 
-            if (isinstance(payload, VariablePayload)):
-                chronos_payload = ChronosPayloadWID(payload)
-                chronos_payload.add_timestamp()
-                payload = chronos_payload
-            
 
 
-        super().ez_send(peer, payloads, sig)
-
+    # Ignore this for now
+    # def ez_send(self, peer: Peer, *payloads: Payload, sig: bool = True) -> None:
+    #     for payload in payloads:
+    #         # Only support VariablePayload convertion for now
+    #         # TODO: Add support for other types of payloads.
+    #         # They would need to be turned into 
+    #         if (isinstance(payload, VariablePayload)):
+    #             chronos_payload = ChronosPayloadWID(payload)
+    #             chronos_payload.add_timestamp()
+    #             payload = chronos_payload
         
+
+
+    #     super().ez_send(peer, payloads, sig)
+
     def started(self) -> None:
         pass
         
@@ -286,7 +318,15 @@ class ReplicationCommunity(Community):
 
     # Callbacks
     def on_peer_added(self, peer):
+        global peers_connected
         print("Found a new peer", peer)
+        if MEMBER_KEYS.keys() not in map(lambda peer: peer.mid, all_peers(self)):
+            print("still waiting on some members")
+            
+        print("all members connected, we can now start the submition community")
+        peers_connected = True
+
+
 
     def on_peer_removed(self, peer) -> None:
         print(f"peer {peer} left")
@@ -325,7 +365,8 @@ async def start_communities():
     await run_forever()
 
 
-
+def all_peers(community: Community) -> list[Peer]: 
+    community.get_peers().append(community.my_peer())
 
 def send_hash(hash):
     ...
