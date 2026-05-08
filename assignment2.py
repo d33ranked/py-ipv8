@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from functools import reduce
 import hashlib
 import operator
+import os
 from random import choice, random
 import time
 from typing import cast
@@ -22,9 +23,13 @@ from ipv8_service import IPv8
 
 from ipv8.keyvault.crypto import default_eccrypto
 from ipv8.keyvault.keys import PrivateKey
+from dotenv import load_dotenv
+
+load_dotenv()
 
 #CHANGE THIS TO YOUR OWN EMAIL
-UNI_EMAIL = "danilvorotilov@tudelft.nl"
+UNI_EMAIL = os.getenv("UNI_EMAIL")
+KEY_PATH = os.getenv("KEY_PATH")
 
 SERVER_PUB_KEY = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
@@ -278,7 +283,7 @@ class SubmissionCommunity(Community, PeerObserver):
         if not peer in self.submission_peers:
             return
 
-        peer_id = MEMBER_KEYS[pub_key(peer)]
+        peer_id = MEMBER_KEYS[pub_ke3y(peer)]
         self.solution_dict[peer_id] = payload.signed_nonce
 
         if len(self.solution_dict) == 3:
@@ -397,7 +402,7 @@ def rand_in_range(start, end) -> int:
 
 async def start_communities():
     builder = ConfigBuilder().clear_keys().clear_overlays()
-    builder.add_key(UNI_EMAIL, "curve25519", "new_key.pem")
+    builder.add_key(UNI_EMAIL, "curve25519", KEY_PATH)
     builder.add_overlay(
         "SubmissionCommunity", 
         UNI_EMAIL,
