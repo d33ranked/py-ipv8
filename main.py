@@ -24,7 +24,7 @@ from ipv8.keyvault.keys import PrivateKey
 #CHANGE THIS TO YOUR OWN EMAIL
 UNI_EMAIL = "danilvorotilov@tudelft.nl"
 
-SERVER_PUB_KEY = "4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1bd4350ffde518068a0d246344b10d0d8c355fd0d76873e7d7f7838f3715e025af08f791324495e083331ce6"
+SERVER_PUB_KEY = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
 COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
 REPLICATION_COMMUNITY_ID = "0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF"
@@ -192,11 +192,6 @@ class SubmissionCommunity(Community, PeerObserver):
         my_submition_id = MEMBER_KEYS[self.my_peer.mid]
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
         solution_dict[my_submition_id + "_" + round_nr] = signed_nonce
-        
-
-        
-
-        
 
     def on_round_result(self, peer):
         pass
