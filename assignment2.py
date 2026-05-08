@@ -1,6 +1,8 @@
 from asyncio import run
 from dataclasses import dataclass
+from functools import reduce
 import hashlib
+import operator
 from random import choice, random
 import time
 from typing import cast
@@ -29,7 +31,7 @@ SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
 COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
 REPLICATION_COMMUNITY_ID = "0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF"
 
-LEADER_ID = "1"
+
 PUBLIC_KEYS = {
     "1": "4c69624e61434c504b3ab61e37a8692d6daa52ffadd042aa7b271121397fb2183b0690e3f29eb70d535ab3a5844182e0193bbda94b4007be5cc0f96aeadd130c6e48542c0109e5f18803",
     "2": "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848",
@@ -49,6 +51,7 @@ global to_send
 global group_id
 global solution_dict
 global server_peer
+global submission_peers
 global round_nr
 global peers_connected
 
@@ -56,6 +59,7 @@ global peers_connected
 solution_dict = dict()
 round_nr = 1
 peers_connected = False
+submission_peers = []
 
 
 
@@ -95,6 +99,12 @@ class RoundResult(VariablePayload):
     format_list = ["?", "q", "q", "varlenHutf8"]
     names = ["success", "round_number", "rounds_completed", "message"]
 
+@vp_compile
+class Solution(VariablePayload):
+    msg_id=11
+    format_list = ["varlenH", "q"]
+    names = ["signed_nonce", "round_nr"]
+
 
 class SubmissionCommunity(Community, PeerObserver):
     # community_id
@@ -114,13 +124,9 @@ class SubmissionCommunity(Community, PeerObserver):
 
         
     def started(self) -> None:
-        global peers_connected
-
-        while not peers_connected:
-            time.sleep(1.0)
         print("starting submition community")
         print("starting a peer listener")
-        print("my key", self.my_peer.public_key.key_to_bin().hex())
+        print("my key", pub_key(self.my_peer))
         self.network.add_peer_observer(self)
 
         
@@ -173,14 +179,15 @@ class SubmissionCommunity(Community, PeerObserver):
     # ---- Callbacks -----
     # --------------------
     def on_peer_added(self, peer):
-        global server_peer
+        global server_peer, submission_peers
         print(f"FOUND PEER: {peer}")
         print(f"-> mid: {peer.mid.hex()}")
         print(f"-> pkeybin: {peer.public_key.key_to_bin().hex()}")
-
-        if not is_server(peer):
+        if MEMBER_KEYS.keys() not in map(lambda peer: pub_key(peer), all_peers(self)) or not any(map(lambda peer: is_server(peer))):
+            print("still waiting on some members and/or the server")
             return
-        
+            
+        [submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
 
         print("FOUND SERVER, SENDING REGISTRATION REQUEST")
         server_peer = peer
@@ -212,12 +219,23 @@ class SubmissionCommunity(Community, PeerObserver):
             return
        
         
-        my_submition_id = MEMBER_KEYS[self.my_peer.mid]
+        my_submition_id = MEMBER_KEYS[pub_key(self.my_peer)]
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
-        solution_dict[my_submition_id + "_" + round_nr] = signed_nonce
+
+        # if our turn to submit collect signatures
+        if round_nr == MEMBER_KEYS[pub_key(self.my_peer)]:
+            solution_dict[my_submition_id + "_" + round_nr] = signed_nonce
+        else: #otherwise tell others about the challange
+            send_to_peers(payload)
+
+            
+
+
+            
 
     @lazy_wrapper(RoundResult)
     def on_round_result(self, peer):
+        
         global round_nr
         if not is_server(peer):
             return 
@@ -225,11 +243,27 @@ class SubmissionCommunity(Community, PeerObserver):
         if not peer.payload.success:
             print("[SERVER]")
 
+    # ---------------------
+    # ---group callbacks---
+    # ---------------------
+    @lazy_wrapper(Solution)
+    def on_solution(self, peer, payload:Solution):
+        global solution_dict
+        if not payload.signed_nonce:
+            return
+        # add a key:value pair of the members registered num and round as key [1..3] , and their signed_nonce as value.
+        solution_dict[MEMBER_KEYS[pub_key(peer)] + "_" + payload.round_nr] = payload.signed_nonce
+        
+
+def pub_key(peer):
+    return peer.public_key.key_to_bin().hex()
 
 def is_server(peer):
     return peer.mid == SERVER_PUB_KEY_SHA1
 
-
+def send_to_peers(payload):
+    global submission_peers
+    [peer.ezsend(payload) for peer in submission_peers]
 
 
 
@@ -239,10 +273,7 @@ class Ping(VariablePayload):
     names = ["timestamp"]
 
 
-class Solution(VariablePayload):
-    msg_id=11
-    format_list = ["varlenH", "q"]
-    names = ["signed_nonce", "round_nr"]
+
 
 
 class PingCache(RandomNumberCacheWithName):
@@ -266,8 +297,6 @@ class ReplicationCommunity(Community, PeerObserver):
         # Register the handler for the server's response
         
         self.add_message_handler(Ping, self.on_ping)
-        self.add_message_handler(Ping, self.on_solution)
-
         self.request_cache = RequestCache()
 
     async def unload(self) -> None:
@@ -282,15 +311,7 @@ class ReplicationCommunity(Community, PeerObserver):
         time.sleep(rand_in_range(self.ping_delay_min, self.ping_delay_max))
         peer.ez_send(Ping(time.time()))
 
-    @lazy_wrapper(Solution)
-    def on_solution(self, peer, payload:Solution):
-        global solution_dict
-        if not payload.signed_nonce:
-            return
-        # add a key:value pair of the members registered num and round as key [1..3] , and their signed_nonce as value.
-        solution_dict[MEMBER_KEYS[peer.mid] + "_" + payload.round_nr] = payload.signed_nonce
-        
-
+    
     # after timeout remove peer
     def on_ping_timeout(self, peer):
         self.get_peers().remove(peer)
@@ -359,6 +380,7 @@ async def start_communities():
         builder.finalize(),
         extra_communities={"SubmissionCommunity": SubmissionCommunity}
     )
+
     
     await ipv8.start()
     
@@ -366,7 +388,9 @@ async def start_communities():
 
 
 def all_peers(community: Community) -> list[Peer]: 
-    community.get_peers().append(community.my_peer())
+    all_peers = community.get_peers()
+    all_peers.append(community.my_peer)
+    return all_peers
 
 def send_hash(hash):
     ...
