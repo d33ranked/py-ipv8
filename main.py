@@ -172,8 +172,11 @@ class SubmissionCommunity(Community, PeerObserver):
         if peer.mid == SERVER_PUB_KEY_SHA1 or peer.public_key.key_to_bin() == bytes.fromhex(SERVER_PUB_KEY):
             print("FOUND SERVER, SENDING REGISTRATION REQUEST")
             server_peer = peer
-            self.ez_send(peer, RegistrationRequest(PUBLIC_KEYS["1"], PUBLIC_KEYS["2"], PUBLIC_KEYS["3"]))
-    
+            self.ez_send(peer, RegistrationRequest(
+                bytes.fromhex(PUBLIC_KEYS["1"]), 
+                bytes.fromhex(PUBLIC_KEYS["2"]), 
+                bytes.fromhex(PUBLIC_KEYS["3"])
+            ))    
 
     def on_peer_removed(self, peer) -> None:
         print(f"peer {peer} left")
