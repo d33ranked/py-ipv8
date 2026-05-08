@@ -52,12 +52,6 @@ MEMBER_KEYS = {
 LASTSENT = "_lastsent"
 
 
-
-
-
-
-
-
 @vp_compile
 class RegistrationRequest(VariablePayload):
     msg_id=1
@@ -95,6 +89,11 @@ class RoundResult(VariablePayload):
     names = ["success", "round_number", "rounds_completed", "message"]
 
 
+@vp_compile
+class PeerRegistrationResponse(VariablePayload):
+    msg_id=11
+    format_list = ["?", "varlenHutf8", "varlenHutf8" ]
+    names = ["success", "group_id", "message"]
 
 @vp_compile
 class PeerChallangeResponse(VariablePayload):
@@ -104,7 +103,7 @@ class PeerChallangeResponse(VariablePayload):
 
 @vp_compile
 class PeerSolution(VariablePayload):
-    msg_id=11
+    msg_id=13
     format_list = ["varlenH", "q"]
     names = ["signed_nonce", "round_nr"]
 
@@ -127,6 +126,7 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(RegistrationResponse, self.on_registration_response)
         self.add_message_handler(ChallangeResponse, self.on_challange_response)
         self.add_message_handler(RoundResult, self.on_round_result)
+        self.add_message_handler(PeerRegistrationResponse, self.on_peer_registration_response)
         self.add_message_handler(PeerChallangeResponse, self.on_peer_challange_response)
         self.add_message_handler(PeerSolution, self.on_peer_solution_response)
         # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
@@ -195,14 +195,15 @@ class SubmissionCommunity(Community, PeerObserver):
         print(f"FOUND PEER: {peer}")
         print(f"-> mid: {peer.mid.hex()}")
         print(f"-> pkeybin: {peer.public_key.key_to_bin().hex()}")
+
+        if is_server(peer):
+            self.server_peer = peer
+
         if MEMBER_KEYS.keys() not in map(lambda peer: pub_key(peer), all_peers(self)) or not any(map(lambda peer: is_server(peer))):
             print("still waiting on some members and/or the server")
             return
             
         [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
-
-        print("FOUND SERVER, SENDING REGISTRATION REQUEST")
-        self.server_peer = peer
 
         # Only peer 1 will send the registration request
         if MEMBER_KEYS[pub_key(self.my_peer)] == "1":
@@ -221,13 +222,14 @@ class SubmissionCommunity(Community, PeerObserver):
             return
         self.group_id = payload.group_id
         print("success", payload.success)
-        print("msg", payload.message)
         print("group_id: ", payload.group_id)
+        print("msg", payload.message)
+
+        self.send_to_peers(PeerRegistrationResponse(payload.success, payload.group_ip, payload.message))
 
         # send challenge request
         get_challenge = ChallangeRequest(group_id = self.group_id)
         self.ez_send(self.server_peer, get_challenge)
-        
 
     @lazy_wrapper(ChallangeResponse)
     def on_challange_response(self, peer, payload:ChallangeResponse):
@@ -259,12 +261,11 @@ class SubmissionCommunity(Community, PeerObserver):
     # ---group callbacks---
     # ---------------------
 
-    @lazy_wrapper(PeerSolution)
-    def on_solution(self, peer, payload:PeerSolution):
-        if not payload.signed_nonce:
+    @lazy_wrapper(PeerRegistrationResponse)
+    def on_peer_registration_response(self, peer, payload: PeerRegistrationResponse):
+        if not peer in self.submission_peers:
             return
-        # add a key:value pair of the members registered num and round as key [1..3] , and their signed_nonce as value.
-        self.solution_dict[MEMBER_KEYS[pub_key(peer)]] = payload.signed_nonce
+        self.group_id = payload.group_id
 
     @lazy_wrapper(PeerChallangeResponse)
     def on_peer_challange_response(self, peer, payload: PeerChallangeResponse):
@@ -281,6 +282,8 @@ class SubmissionCommunity(Community, PeerObserver):
     @lazy_wrapper(PeerSolution)
     def on_peer_solution_response(self, peer, payload: PeerSolution):
         if not peer in self.submission_peers:
+            return
+        if not payload.signed_nonce:
             return
 
         peer_id = MEMBER_KEYS[pub_ke3y(peer)]
@@ -299,7 +302,13 @@ class SubmissionCommunity(Community, PeerObserver):
     # Helper functions
     def send_to_peers(self, payload):
         [peer.ezsend(payload) for peer in self.submission_peers]
-        
+
+# Helper functions
+
+def all_peers(community: Community) -> list[Peer]:
+    all_peers = community.get_peers()
+    all_peers.append(community.my_peer)
+    return all_peers
 
 def pub_key(peer):
     return peer.public_key.key_to_bin().hex()
@@ -307,152 +316,34 @@ def pub_key(peer):
 def is_server(peer):
     return peer.mid == SERVER_PUB_KEY_SHA1
 
-
-
-
-
-class Ping(VariablePayload):
-    msg_id=10
-    format_list = ["d"]
-    names = ["timestamp"]
-
-
-
-
-
-class PingCache(RandomNumberCacheWithName):
-
-
-    def __init__(self, request_cache: RequestCache, name: str, value:int) -> None:
-        super().__init__(request_cache, self.name)
-        self.value = value
-        self.name = name
-
-class ReplicationCommunity(Community, PeerObserver):
-
-    community_id = bytes.fromhex(REPLICATION_COMMUNITY_ID)
-
-    timeout = 30
-    ping_delay_min = 5
-    ping_delay_max = 10
-
-    def __init__(self, settings: CommunitySettings):
-        super().__init__(settings)
-        # Register the handler for the server's response
-        
-        self.add_message_handler(Ping, self.on_ping)
-        self.request_cache = RequestCache()
-
-    async def unload(self) -> None:
-        await self.request_cache.shutdown()
-        await super().unload()
-        
-    @lazy_wrapper(Ping)
-    def on_ping(self, peer):
-        self.cancel_pending_task(peer.mid.hex() + LASTSENT)
-        self.register_task(peer.mid.hex() + LASTSENT, self.on_timeout, delay=self.timeout)
-        self.request_cache.add(PingCache(self.request_cache, peer.mid.hex() + LASTSENT, time.time()))
-        time.sleep(rand_in_range(self.ping_delay_min, self.ping_delay_max))
-        peer.ez_send(Ping(time.time()))
-
-    
-    # after timeout remove peer
-    def on_ping_timeout(self, peer):
-        self.get_peers().remove(peer)
-
-
-    # Ignore this for now
-    # def ez_send(self, peer: Peer, *payloads: Payload, sig: bool = True) -> None:
-    #     for payload in payloads:
-    #         # Only support VariablePayload convertion for now
-    #         # TODO: Add support for other types of payloads.
-    #         # They would need to be turned into 
-    #         if (isinstance(payload, VariablePayload)):
-    #             chronos_payload = ChronosPayloadWID(payload)
-    #             chronos_payload.add_timestamp()
-    #             payload = chronos_payload
-        
-
-
-    #     super().ez_send(peer, payloads, sig)
-
-    def started(self) -> None:
-        pass
-        
-        
-
-    # Callbacks
-    def on_peer_added(self, peer):
-        global peers_connected
-        print("Found a new peer", peer)
-        if MEMBER_KEYS.keys() not in map(lambda peer: peer.mid, all_peers(self)):
-            print("still waiting on some members")
-            
-        print("all members connected, we can now start the submition community")
-        peers_connected = True
-
-
-
-    def on_peer_removed(self, peer) -> None:
-        print(f"peer {peer} left")
-
-# time in ms between start and end
-def rand_in_range(start, end) -> int:
-    return random.random() * (end-start) + start
-
 async def start_communities():
     builder = ConfigBuilder().clear_keys().clear_overlays()
     builder.add_key(UNI_EMAIL, "curve25519", KEY_PATH)
     builder.add_overlay(
-        "SubmissionCommunity", 
+        "SubmissionCommunity",
         UNI_EMAIL,
         [
             WalkerDefinition
                 (
-                    Strategy.RandomWalk, 
-                    10, 
-                    {"timeout": 3.0}
-                    
-                )
+                Strategy.RandomWalk,
+                10,
+                {"timeout": 3.0}
+
+            )
         ],
         default_bootstrap_defs,
         {},
         [("started",)]
     )
-    
+
     ipv8 = IPv8(
         builder.finalize(),
         extra_communities={"SubmissionCommunity": SubmissionCommunity}
     )
 
-    
     await ipv8.start()
-    
+
     await run_forever()
-
-
-def all_peers(community: Community) -> list[Peer]: 
-    all_peers = community.get_peers()
-    all_peers.append(community.my_peer)
-    return all_peers
-
-def send_hash(hash):
-    ...
-
-def find_nonce(static_str):
-    
-    for i in range(0, 2**64):
-        # only add nonce to the static part of the payload
-        msg = static_str + i.to_bytes(8, byteorder='big')
-        msg_hash = hashlib.sha256(msg).digest() 
-        
-        if check_zeros(msg_hash, DIFFICULTY):
-            print(f"Found hash at nonce: {i}, with hash: {msg_hash.hex()}")
-            exit(0)
-
-
-def check_zeros(hash, difficulty):
-    return hash < difficulty
 
 def main():
     run(start_communities())
