@@ -33,13 +33,13 @@ REPLICATION_COMMUNITY_ID = "0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF"
 
 
 PUBLIC_KEYS = {
-    "1": "4c69624e61434c504b3ab61e37a8692d6daa52ffadd042aa7b271121397fb2183b0690e3f29eb70d535ab3a5844182e0193bbda94b4007be5cc0f96aeadd130c6e48542c0109e5f18803",
+    "1": "4c69624e61434c504b3aa3387dfd20b578dfce201978aea6f25dfa3b3127e6825ce7bd2fb8ce07797f7c8bf427fa376e6eaf58391430e63eb86dc93aebb3f68c89bc9d99c63882034a90",
     "2": "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848",
     "3": "4c69624e61434c504b3af9e8ecfcb5968c5438c65adf621afcb336895329da741ef0e1ff846db37f3a1dd4188afcad7d8f8a890571930a4bb7b982904911437c2aba97922746c5fdb176"
 }
 
 MEMBER_KEYS = {
-    "4c69624e61434c504b3ab61e37a8692d6daa52ffadd042aa7b271121397fb2183b0690e3f29eb70d535ab3a5844182e0193bbda94b4007be5cc0f96aeadd130c6e48542c0109e5f18803": "1",
+    "4c69624e61434c504b3aa3387dfd20b578dfce201978aea6f25dfa3b3127e6825ce7bd2fb8ce07797f7c8bf427fa376e6eaf58391430e63eb86dc93aebb3f68c89bc9d99c63882034a90": "1",
     "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848": "2",
     "4c69624e61434c504b3af9e8ecfcb5968c5438c65adf621afcb336895329da741ef0e1ff846db37f3a1dd4188afcad7d8f8a890571930a4bb7b982904911437c2aba97922746c5fdb176": "3"
 }
@@ -122,6 +122,9 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(RegistrationResponse, self.on_registration_response)
         self.add_message_handler(ChallangeResponse, self.on_challange_response)
         self.add_message_handler(RoundResult, self.on_round_result)
+        self.add_message_handler(PeerChallangeResponse, self.on_peer_challange_response)
+        self.add_message_handler(PeerSolution, self.on_peer_solution_response)
+        # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
     
 
 
