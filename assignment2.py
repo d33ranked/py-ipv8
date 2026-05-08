@@ -122,7 +122,9 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(RegistrationResponse, self.on_registration_response)
         self.add_message_handler(ChallangeResponse, self.on_challange_response)
         self.add_message_handler(RoundResult, self.on_round_result)
-        self.register_task("check_solutions", self.check_solutions, interval = 0.1)
+        self.add_message_handler(PeerChallangeResponse, self.on_peer_challange_response)
+        self.add_message_handler(PeerSolution, self.on_peer_solution_response)
+        # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
     
 
 
