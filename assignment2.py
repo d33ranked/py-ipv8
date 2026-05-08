@@ -286,7 +286,7 @@ class SubmissionCommunity(Community, PeerObserver):
         if not payload.signed_nonce:
             return
 
-        peer_id = MEMBER_KEYS[pub_ke3y(peer)]
+        peer_id = MEMBER_KEYS[pub_key(peer)]
         self.solution_dict[peer_id] = payload.signed_nonce
 
         if len(self.solution_dict) == 3:
