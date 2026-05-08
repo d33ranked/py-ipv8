@@ -191,7 +191,7 @@ class SubmissionCommunity(Community, PeerObserver):
         global round_nr, solution_dict
         my_submition_id = MEMBER_KEYS[self.my_peer.mid]
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
-        solution_dict[my_submition_id + "_" + round_nr]
+        solution_dict[my_submition_id + "_" + round_nr] = signed_nonce
         
 
         
