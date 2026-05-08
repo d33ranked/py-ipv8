@@ -46,17 +46,10 @@ MEMBER_KEYS = {
 
 LASTSENT = "_lastsent"
 
-# Global variables
-global group_id
-global solution_dict
-global server_peer
-global submission_peers
-global round_nr
 
 
-solution_dict = dict()
-round_nr = 1
-submission_peers = []
+
+
 
 
 
@@ -114,6 +107,13 @@ class PeerSolution(VariablePayload):
 class SubmissionCommunity(Community, PeerObserver):
     # community_id
     community_id = bytes.fromhex(COMMUNITY_ID)
+    # Global variables
+    group_id = None
+    solution_dict = dict()
+    server_peer = None
+    submission_peers = []
+    round_nr = 1
+
 
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
@@ -122,7 +122,6 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(RegistrationResponse, self.on_registration_response)
         self.add_message_handler(ChallangeResponse, self.on_challange_response)
         self.add_message_handler(RoundResult, self.on_round_result)
-        self.register_task("check_solutions", self.check_solutions, interval = 0.1)
     
 
 
@@ -140,11 +139,12 @@ class SubmissionCommunity(Community, PeerObserver):
     # --------------------
     # ------ Tasks -------
     # --------------------
+    # depricated
     def check_solutions(self):
-        global group_id, solution_dict, round_nr, to_send, server_peer
+        global to_send
         ids = []
         sum = 0
-        for key in list(solution_dict.keys()):
+        for key in list(self.solution_dict.keys()):
             args = key.split("_")
             if len(args) < 2:
                 continue
@@ -152,29 +152,29 @@ class SubmissionCommunity(Community, PeerObserver):
             temp_id = args[0]
             curr_round_nr = args[1]
             
-            if curr_round_nr == round_nr and temp_id not in ids:
+            if curr_round_nr == self.round_nr and temp_id not in ids:
                 ids.append(temp_id)
                 sum+=1
         
         if sum != 3:
             return
         # We know these exist
-        sig1 = solution_dict["1_"+round_nr]
-        sig2 = solution_dict["2_"+round_nr]
-        sig3 = solution_dict["3_"+round_nr]
+        sig1 = self.solution_dict["1"]
+        sig2 = self.solution_dict["2"]
+        sig3 = self.solution_dict["3"]
         # here sum is 3, so we are ready to send the packaged solution
         to_send = BundleSubmission(
-            group_id,
-            round_nr,
+            self.group_id,
+            self.round_nr,
             sig1,
             sig2,
             sig3
         )
 
-        if not server_peer:
+        if not self.server_peer:
             print("[WARNING] server was never found as a peer")
 
-        server_peer.ez_send(to_send)
+        self.server_peer.ez_send(to_send)
 
 
 
@@ -184,7 +184,6 @@ class SubmissionCommunity(Community, PeerObserver):
     # ---- Callbacks -----
     # --------------------
     def on_peer_added(self, peer):
-        global server_peer, submission_peers
         print(f"FOUND PEER: {peer}")
         print(f"-> mid: {peer.mid.hex()}")
         print(f"-> pkeybin: {peer.public_key.key_to_bin().hex()}")
@@ -192,10 +191,10 @@ class SubmissionCommunity(Community, PeerObserver):
             print("still waiting on some members and/or the server")
             return
             
-        [submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
+        [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
 
         print("FOUND SERVER, SENDING REGISTRATION REQUEST")
-        server_peer = peer
+        self.server_peer = peer
 
         # Only peer 1 will send the registration request
         if MEMBER_KEYS[pub_key(self.my_peer)] == "1":
@@ -210,22 +209,20 @@ class SubmissionCommunity(Community, PeerObserver):
 
     @lazy_wrapper(RegistrationResponse)
     def on_registration_response(self, peer, payload:RegistrationResponse):
-        global group_id
         if not is_server(peer):
             return
-        group_id = payload.group_id
+        self.group_id = payload.group_id
         print("success", payload.success)
         print("msg", payload.message)
         print("group_id: ", payload.group_id)
 
         # send challenge request
-        get_challenge = ChallangeRequest(group_id = group_id)
-        self.ez_send(server_peer, get_challenge)
+        get_challenge = ChallangeRequest(group_id = self.group_id)
+        self.ez_send(self.server_peer, get_challenge)
         
 
     @lazy_wrapper(ChallangeResponse)
     def on_challange_response(self, peer, payload:ChallangeResponse):
-        global round_nr, solution_dict
         if not is_server(peer):
             return
        
@@ -234,46 +231,16 @@ class SubmissionCommunity(Community, PeerObserver):
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
 
         # if our turn to submit collect signatures
-        if round_nr == MEMBER_KEYS[pub_key(self.my_peer)]: #should always be true anyway
-            solution_dict[my_submition_id] = signed_nonce
+        if self.round_nr == MEMBER_KEYS[pub_key(self.my_peer)]: #should always be true anyway
+            self.solution_dict[my_submition_id] = signed_nonce
             send_to_peers(PeerChallangeResponse(nonce = payload.nonce, round_number = payload.round_number, deadline=payload.deadline))
 
-    @lazy_wrapper(PeerChallangeResponse)
-    def on_peer_challange_response(self, peer, payload: PeerChallangeResponse):
-        if not peer in submission_peers:
-            return
-
-        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
-        payload = PeerSolution(signed_nonce, round_nr)
-
-        for p in submission_peers:
-            if pub_key(p) == PUBLIC_KEYS[round_nr]:
-                self.ez_send(p, payload)
-
-    @lazy_wrapper(PeerSolution)
-    def on_peer_solution_response(self, peer, payload: PeerSolution):
-        global round_nr, solution_dict, server_peer
-        if not peer in submission_peers:
-            return
-
-        peer_id = MEMBER_KEYS[pub_key(peer)]
-        solution_dict[peer_id] = payload.signed_nonce
-
-        if len(self.solution_dict) == 3:
-            to_send = BundleSubmission(
-                group_id,
-                round_nr,
-                solution_dict["1"],
-                solution_dict["2"],
-                solution_dict["3"]
-            )
-            self.ez_send(server_peer, to_send)
+    
 
 
     @lazy_wrapper(RoundResult)
     def on_round_result(self, peer):
-        
-        global round_nr
+
         if not is_server(peer):
             return 
         
@@ -283,13 +250,47 @@ class SubmissionCommunity(Community, PeerObserver):
     # ---------------------
     # ---group callbacks---
     # ---------------------
+
     @lazy_wrapper(PeerSolution)
     def on_solution(self, peer, payload:PeerSolution):
-        global solution_dict
         if not payload.signed_nonce:
             return
         # add a key:value pair of the members registered num and round as key [1..3] , and their signed_nonce as value.
-        solution_dict[MEMBER_KEYS[pub_key(peer)] + "_" + payload.round_nr] = payload.signed_nonce
+        self.solution_dict[MEMBER_KEYS[pub_key(peer)]] = payload.signed_nonce
+
+    @lazy_wrapper(PeerChallangeResponse)
+    def on_peer_challange_response(self, peer, payload: PeerChallangeResponse):
+        if not peer in self.submission_peers:
+            return
+
+        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
+        payload = PeerSolution(signed_nonce, self.round_nr)
+
+        for p in self.submission_peers:
+            if pub_key(p) == PUBLIC_KEYS[self.round_nr]:
+                self.ez_send(p, payload)
+
+    @lazy_wrapper(PeerSolution)
+    def on_peer_solution_response(self, peer, payload: PeerSolution):
+        if not peer in self.submission_peers:
+            return
+
+        peer_id = MEMBER_KEYS[pub_key(peer)]
+        self.solution_dict[peer_id] = payload.signed_nonce
+
+        if len(self.solution_dict) == 3:
+            to_send = BundleSubmission(
+                self.group_id,
+                self.round_nr,
+                self.solution_dict["1"],
+                self.solution_dict["2"],
+                self.solution_dict["3"]
+            )
+            self.ez_send(self.server_peer, to_send)
+
+    # Helper functions
+    def send_to_peers(self, payload):
+        [peer.ezsend(payload) for peer in self.submission_peers]
         
 
 def pub_key(peer):
@@ -298,9 +299,7 @@ def pub_key(peer):
 def is_server(peer):
     return peer.mid == SERVER_PUB_KEY_SHA1
 
-def send_to_peers(payload):
-    global submission_peers
-    [peer.ezsend(payload) for peer in submission_peers]
+
 
 
 
