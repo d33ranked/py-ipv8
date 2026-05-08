@@ -233,7 +233,7 @@ class SubmissionCommunity(Community, PeerObserver):
         # if our turn to submit collect signatures
         if self.round_nr == MEMBER_KEYS[pub_key(self.my_peer)]: #should always be true anyway
             self.solution_dict[my_submition_id] = signed_nonce
-            send_to_peers(PeerChallangeResponse(nonce = payload.nonce, round_number = payload.round_number, deadline=payload.deadline))
+            self.send_to_peers(PeerChallangeResponse(nonce = payload.nonce, round_number = payload.round_number, deadline=payload.deadline))
 
     
 
