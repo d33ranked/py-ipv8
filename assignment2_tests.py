@@ -18,9 +18,19 @@ class MyTests(TestBase[SubmissionCommunity]):
 
     def setUp(self) -> None:
         super().setUp()
-        
-        # Insert your setUp logic here
+
+        # Create 1 MyCommunity
+        self.initialize(SubmissionCommunity, 6)
+        # Nodes are 0-indexed
+        value = self.overlay(0).some_constant()
+        self.server_key = self.overlay(0).my_peer.public_key.key_to_bin().hex()
+        self.assertEqual(42, value)
+
 
     async def tearDown(self) -> None:
         await super().tearDown()
-        # Insert your tearDown logic here
+        
+
+    # 
+    def test_wrong_user(self):
+        pass
