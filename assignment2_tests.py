@@ -1,3 +1,4 @@
+import asyncio
 import hashlib
 import os
 import unittest
@@ -73,7 +74,9 @@ class SubmissionCommunityTests(TestBase[SubmissionCommunity]):
 
     # Tests wether the server peer is initialized correctly for peer 1 after peer discovery.
     async def test_server_var_init(self) -> None:
+        
         self.overlay(0).send_introduction_request(self.peer(1))
+        
         await self.deliver_messages()
         self.assertEqual(
             self.key_bin(0).hex(), 
