@@ -47,7 +47,7 @@ class SubmissionCommunityTests(TestBase[SubmissionCommunity]):
     async def test_intro_called(self) -> None:
         self.overlay(0).send_introduction_request(self.peer(1))
         await self.deliver_messages()
-        self.assertEqual(self.peer(0).public_key.get_, SERVER_PUB_KEY)
+        self.assertEqual(self.peer(0).public_key.key_to_bin().hex(), SERVER_PUB_KEY)
         
 
     # 
