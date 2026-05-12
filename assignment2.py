@@ -204,7 +204,10 @@ class SubmissionCommunity(Community, PeerObserver):
         if is_server(peer):
             self.server_peer = peer
 
-        if MEMBER_KEYS.keys() not in map(lambda peer: pub_key(peer), all_peers(self)) or not any(map(lambda peer: is_server(peer))):
+
+        peers = all_peers(self)
+
+        if not all(member in map(lambda peer: pub_key(peer), peers) for member in list(MEMBER_KEYS.keys())) or not self.server_peer:
             print("still waiting on some members and/or the server")
             return
             
@@ -318,8 +321,8 @@ def all_peers(community: Community) -> list[Peer]:
 def pub_key(peer):
     return peer.public_key.key_to_bin().hex()
 
-def is_server(peer):
-    return peer.mid == SERVER_PUB_KEY_SHA1
+def is_server(peer: Peer):
+    return peer.public_key.key_to_bin().hex() == SERVER_PUB_KEY
 
 async def start_communities():
     builder = ConfigBuilder().clear_keys().clear_overlays()
