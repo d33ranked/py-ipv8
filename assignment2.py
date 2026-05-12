@@ -113,6 +113,12 @@ class PeerSolution(VariablePayload):
     format_list = ["varlenH", "q"]
     names = ["signed_nonce", "round_nr"]
 
+@vp_compile
+class PeerReadyMessage(VariablePayload):
+    msg_id=14
+    format_list = ["?"]
+    names = ["ready"]
+
 
 class SubmissionCommunity(Community, PeerObserver):
     # community_id
@@ -123,7 +129,8 @@ class SubmissionCommunity(Community, PeerObserver):
     server_peer = None
     submission_peers = []
     round_nr = 1
-    registration_sent = False
+    registration_complete = False
+    readys_received = dict() # dictionary to count all the readys from the peers
 
 
     def __init__(self, settings: CommunitySettings):
@@ -136,6 +143,7 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(PeerRegistrationResponse, self.on_peer_registration_response)
         self.add_message_handler(PeerChallangeResponse, self.on_peer_challange_response)
         self.add_message_handler(PeerSolution, self.on_peer_solution_response)
+        self.add_message_handler(PeerReadyMessage, self.on_peer_ready)
         # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
     
 
@@ -148,50 +156,7 @@ class SubmissionCommunity(Community, PeerObserver):
         print("my key:", "..." + pub_key(self.my_peer)[-TAIL_N:])
         self.network.add_peer_observer(self)
 
-        
-        
-        
-    # --------------------
-    # ------ Tasks -------
-    # --------------------
-    # depricated
-    def check_solutions(self):
-        global to_send
-        ids = []
-        sum = 0
-        for key in list(self.solution_dict.keys()):
-            args = key.split("_")
-            if len(args) < 2:
-                continue
-            # TODO: Make sure temp_id is indeed in range [1..3]
-            temp_id = args[0]
-            curr_round_nr = args[1]
-            
-            if curr_round_nr == self.round_nr and temp_id not in ids:
-                ids.append(temp_id)
-                sum+=1
-        
-        if sum != 3:
-            return
-        # We know these exist
-        sig1 = self.solution_dict["1"]
-        sig2 = self.solution_dict["2"]
-        sig3 = self.solution_dict["3"]
-        # here sum is 3, so we are ready to send the packaged solution
-        to_send = BundleSubmission(
-            self.group_id,
-            self.round_nr,
-            sig1,
-            sig2,
-            sig3
-        )
-
-        if not self.server_peer:
-            print("[WARNING] server was never found as a peer")
-
-        self.server_peer.ez_send(to_send)
-
-
+    
 
 
 
@@ -201,9 +166,12 @@ class SubmissionCommunity(Community, PeerObserver):
     def on_peer_added(self, peer):
         
         # reduce clutter in logs post registration
-        if not self.registration_sent:
-            print(f"FOUND PEER: {peer}")
-            print(f"-> pkeybin: {"..." + pub_key(peer)[-TAIL_N:]}")
+        if self.registration_complete:
+            return
+        
+
+        print(f"FOUND PEER: {peer}")
+        print(f"-> pkeybin: {"..." + pub_key(peer)[-TAIL_N:]}")
 
         if is_server(peer):
             self.server_peer = peer
@@ -217,20 +185,40 @@ class SubmissionCommunity(Community, PeerObserver):
             
         [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
 
+        self.ez_send(self.my_peer, PeerReadyMessage(ready=True))
+        self.send_to_peers(PeerReadyMessage(ready=True))
+
+        
+
+            
+
+    def on_peer_removed(self, peer) -> None:
+        print(f"peer {peer} left")
+
+    @lazy_wrapper(PeerReadyMessage)
+    def on_peer_ready(self, peer, payload: PeerReadyMessage) -> None:
+        if not self.is_from_team(peer) or self.registration_complete:
+            return
+        try:
+            self.readys_received[MEMBER_KEYS[pub_key(peer)]] = True
+        except KeyError:
+            print("Member doesn't exist in MEMBER_KEYS")
+        
+        if not all(self.readys_received.values()) and len(self.readys_received) != 3:
+            return
+    
+        # here, all peers are ready, so send registration to server
+        print("[SELF] ALL PEERS READY")
         # Only peer 1 will send the registration request
-        if MEMBER_KEYS[pub_key(self.my_peer)] == "1" and not self.registration_sent:
+        if MEMBER_KEYS[pub_key(self.my_peer)] == "1" and not self.registration_complete:
             print("sending RegistrationRequest")
             self.ez_send(self.server_peer, RegistrationRequest(
                 bytes.fromhex(PUBLIC_KEYS["1"]),
                 bytes.fromhex(PUBLIC_KEYS["2"]),
                 bytes.fromhex(PUBLIC_KEYS["3"])
             ))
-            self.registration_sent = True
-
-            
-
-    def on_peer_removed(self, peer) -> None:
-        print(f"peer {peer} left")
+            self.registration_complete = True
+        
 
     @lazy_wrapper(RegistrationResponse)
     def on_registration_response(self, peer, payload:RegistrationResponse):
@@ -254,19 +242,24 @@ class SubmissionCommunity(Community, PeerObserver):
        
         print(f"[SERVER] - round {payload.round_number} challange with nonce: {payload.nonce.hex()}")
         
-        my_submition_id = MEMBER_KEYS[pub_key(self.my_peer)]
-        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
-        print("[SELF] Signed nonce:", signed_nonce)
+        my_submition_id = MEMBER_KEYS[pub_key(self.my_peer)] # this was a str all the time
+        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce)
+        
         # if our turn to submit collect signatures
-        if self.round_nr == MEMBER_KEYS[pub_key(self.my_peer)]: #should always be true anyway
-            print("[Note] - Our turn to collect signatures, send peer challange response")
+        print("my_sub_id:", my_submition_id)
+        print("round_nr:", self.round_nr)
+        if self.round_nr == int(my_submition_id): #should always be true anyway
+            print("[SELF] - Our turn to collect signatures, send peer challange response")
             self.solution_dict[my_submition_id] = signed_nonce
-            self.send_to_peers(PeerChallangeResponse(
-                nonce = payload.nonce, 
-                round_number = payload.round_number, 
-                deadline=payload.deadline)
+            self.send_to_peers(
+                PeerChallangeResponse(
+                    nonce = payload.nonce, 
+                    round_number = payload.round_number, 
+                    deadline= payload.deadline
+                )
             )
         else: # otherwise pass the payload along to peers, and send them your solution
+            print("[SELF] passing allong solution")
             self.send_to_peers(payload)
             self.send_to_peers(PeerSolution(signed_nonce, self.round_nr))
         
@@ -276,7 +269,7 @@ class SubmissionCommunity(Community, PeerObserver):
 
 
     @lazy_wrapper(RoundResult)
-    def on_round_result(self, peer):
+    def on_round_result(self, peer, payload: RoundResult):
 
         if not is_server(peer):
             return 
@@ -301,11 +294,11 @@ class SubmissionCommunity(Community, PeerObserver):
         if not self.is_from_team(peer):
             return
 
-        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
+        signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce)
         payload = PeerSolution(signed_nonce, self.round_nr)
 
         for p in self.submission_peers:
-            if pub_key(p) == PUBLIC_KEYS[self.round_nr]:
+            if pub_key(p) == PUBLIC_KEYS[str(self.round_nr)]:
                 self.ez_send(p, payload)
 
     @lazy_wrapper(PeerSolution)
