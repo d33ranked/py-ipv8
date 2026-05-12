@@ -56,6 +56,7 @@ MEMBER_KEYS = {
 
 LASTSENT = "_lastsent"
 
+TAIL_N = 5
 
 @vp_compile
 class RegistrationRequest(VariablePayload):
@@ -122,6 +123,7 @@ class SubmissionCommunity(Community, PeerObserver):
     server_peer = None
     submission_peers = []
     round_nr = 1
+    registration_sent = False
 
 
     def __init__(self, settings: CommunitySettings):
@@ -143,7 +145,7 @@ class SubmissionCommunity(Community, PeerObserver):
     def started(self) -> None:
         print("starting submition community")
         print("starting a peer listener")
-        print("my key", pub_key(self.my_peer))
+        print("my key:", "..." + pub_key(self.my_peer)[-TAIL_N:])
         self.network.add_peer_observer(self)
 
         
@@ -197,9 +199,9 @@ class SubmissionCommunity(Community, PeerObserver):
     # ---- Callbacks -----
     # --------------------
     def on_peer_added(self, peer):
+        
         print(f"FOUND PEER: {peer}")
-        print(f"-> mid: {peer.mid.hex()}")
-        print(f"-> pkeybin: {peer.public_key.key_to_bin().hex()}")
+        print(f"-> pkeybin: {"..." + pub_key(peer)[-TAIL_N:]}")
 
         if is_server(peer):
             self.server_peer = peer
@@ -214,12 +216,16 @@ class SubmissionCommunity(Community, PeerObserver):
         [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
 
         # Only peer 1 will send the registration request
-        if MEMBER_KEYS[pub_key(self.my_peer)] == "1":
-            self.ez_send(peer, RegistrationRequest(
+        if MEMBER_KEYS[pub_key(self.my_peer)] == "1" and not self.registration_sent:
+            print("sending RegistrationRequest")
+            self.ez_send(self.server_peer, RegistrationRequest(
                 bytes.fromhex(PUBLIC_KEYS["1"]),
                 bytes.fromhex(PUBLIC_KEYS["2"]),
                 bytes.fromhex(PUBLIC_KEYS["3"])
             ))
+            self.registration_sent = True
+
+            
 
     def on_peer_removed(self, peer) -> None:
         print(f"peer {peer} left")
@@ -233,7 +239,7 @@ class SubmissionCommunity(Community, PeerObserver):
         print("group_id: ", payload.group_id)
         print("msg", payload.message)
 
-        self.send_to_peers(PeerRegistrationResponse(payload.success, payload.group_ip, payload.message))
+        self.send_to_peers(PeerRegistrationResponse(payload.success, payload.group_id, payload.message))
 
         # send challenge request
         get_challenge = ChallangeRequest(group_id = self.group_id)
@@ -244,6 +250,7 @@ class SubmissionCommunity(Community, PeerObserver):
         if not is_server(peer):
             return
        
+        print(f"[SERVER] - round {payload.round_number} challange with nonce: {payload.nonce.hex()}")
         
         my_submition_id = MEMBER_KEYS[pub_key(self.my_peer)]
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
@@ -251,7 +258,13 @@ class SubmissionCommunity(Community, PeerObserver):
         # if our turn to submit collect signatures
         if self.round_nr == MEMBER_KEYS[pub_key(self.my_peer)]: #should always be true anyway
             self.solution_dict[my_submition_id] = signed_nonce
-            self.send_to_peers(PeerChallangeResponse(nonce = payload.nonce, round_number = payload.round_number, deadline=payload.deadline))
+            self.send_to_peers(PeerChallangeResponse(
+                nonce = payload.nonce, 
+                round_number = payload.round_number, 
+                deadline=payload.deadline)
+            )
+        
+        
 
     
 
@@ -273,7 +286,9 @@ class SubmissionCommunity(Community, PeerObserver):
     def on_peer_registration_response(self, peer, payload: PeerRegistrationResponse):
         if not peer in self.submission_peers:
             return
-        self.group_id = payload.group_id
+        if payload.success:
+            print(f"[PEER] - Recieved Registration Response, group_id: {payload.group_id}")
+            self.group_id = payload.group_id
 
     @lazy_wrapper(PeerChallangeResponse)
     def on_peer_challange_response(self, peer, payload: PeerChallangeResponse):
@@ -309,7 +324,7 @@ class SubmissionCommunity(Community, PeerObserver):
 
     # Helper functions
     def send_to_peers(self, payload):
-        [peer.ezsend(payload) for peer in self.submission_peers]
+        [self.ez_send(peer, payload) for peer in self.submission_peers]
 
 # Helper functions
 
