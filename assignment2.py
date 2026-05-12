@@ -200,8 +200,10 @@ class SubmissionCommunity(Community, PeerObserver):
     # --------------------
     def on_peer_added(self, peer):
         
-        print(f"FOUND PEER: {peer}")
-        print(f"-> pkeybin: {"..." + pub_key(peer)[-TAIL_N:]}")
+        # reduce clutter in logs post registration
+        if not self.registration_sent:
+            print(f"FOUND PEER: {peer}")
+            print(f"-> pkeybin: {"..." + pub_key(peer)[-TAIL_N:]}")
 
         if is_server(peer):
             self.server_peer = peer
@@ -247,22 +249,26 @@ class SubmissionCommunity(Community, PeerObserver):
 
     @lazy_wrapper(ChallangeResponse)
     def on_challange_response(self, peer, payload:ChallangeResponse):
-        if not is_server(peer):
+        if not is_server(peer) or self.is_from_team(peer):
             return
        
         print(f"[SERVER] - round {payload.round_number} challange with nonce: {payload.nonce.hex()}")
         
         my_submition_id = MEMBER_KEYS[pub_key(self.my_peer)]
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
-
+        print("[SELF] Signed nonce:", signed_nonce)
         # if our turn to submit collect signatures
         if self.round_nr == MEMBER_KEYS[pub_key(self.my_peer)]: #should always be true anyway
+            print("[Note] - Our turn to collect signatures, send peer challange response")
             self.solution_dict[my_submition_id] = signed_nonce
             self.send_to_peers(PeerChallangeResponse(
                 nonce = payload.nonce, 
                 round_number = payload.round_number, 
                 deadline=payload.deadline)
             )
+        else: # otherwise pass the payload along to peers, and send them your solution
+            self.send_to_peers(payload)
+            self.send_to_peers(PeerSolution(signed_nonce, self.round_nr))
         
         
 
@@ -292,7 +298,7 @@ class SubmissionCommunity(Community, PeerObserver):
 
     @lazy_wrapper(PeerChallangeResponse)
     def on_peer_challange_response(self, peer, payload: PeerChallangeResponse):
-        if not peer in self.submission_peers:
+        if not self.is_from_team(peer):
             return
 
         signed_nonce = default_eccrypto.create_signature(cast("PrivateKey", self.my_peer.key), payload.nonce).hex()
@@ -304,15 +310,22 @@ class SubmissionCommunity(Community, PeerObserver):
 
     @lazy_wrapper(PeerSolution)
     def on_peer_solution_response(self, peer, payload: PeerSolution):
-        if not peer in self.submission_peers:
+        print(f"[PEER] got a solution from {MEMBER_KEYS[pub_key(peer)]}")
+        if not self.is_from_team(peer):
             return
         if not payload.signed_nonce:
             return
+        
+        if self.round_nr != payload.round_nr:
+            print("[SELF] we are not the ones submitting this round")
+            return
 
+        print("[SELF] adding to solution_dict from peer: ", MEMBER_KEYS[pub_key(peer)])
         peer_id = MEMBER_KEYS[pub_key(peer)]
         self.solution_dict[peer_id] = payload.signed_nonce
 
         if len(self.solution_dict) == 3:
+            print("[SELF] dict ready, sending solution to server")
             to_send = BundleSubmission(
                 self.group_id,
                 self.round_nr,
@@ -325,6 +338,9 @@ class SubmissionCommunity(Community, PeerObserver):
     # Helper functions
     def send_to_peers(self, payload):
         [self.ez_send(peer, payload) for peer in self.submission_peers]
+
+    def is_from_team(self, peer):
+        return pub_key(peer) in map(lambda peer: pub_key(peer), self.submission_peers)
 
 # Helper functions
 
