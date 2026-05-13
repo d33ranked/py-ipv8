@@ -119,6 +119,12 @@ class PeerReadyMessage(VariablePayload):
     format_list = ["?"]
     names = ["ready"]
 
+@vp_compile
+class PeerRoundResult(VariablePayload):
+    msg_id=15
+    format_list = ["?", "q", "q", "varlenHutf8"]
+    names = ["success", "round_number", "rounds_completed", "message"]
+
 
 class SubmissionCommunity(Community, PeerObserver):
     # community_id
@@ -144,6 +150,10 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(PeerChallangeResponse, self.on_peer_challange_response)
         self.add_message_handler(PeerSolution, self.on_peer_solution_response)
         self.add_message_handler(PeerReadyMessage, self.on_peer_ready)
+
+        self.readys_received["1"] = False
+        self.readys_received["2"] = False
+        self.readys_received["3"] = False
         # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
     
 
@@ -178,16 +188,34 @@ class SubmissionCommunity(Community, PeerObserver):
 
 
         peers = all_peers(self)
+        
+        all_team_present = False
+        _team = dict()
+        _team["1"] = False
+        _team["2"] = False
+        _team["3"] = False
 
-        if not all(member in map(lambda peer: pub_key(peer), peers) for member in list(MEMBER_KEYS.keys())) or not self.server_peer:
+        _team[MEMBER_KEYS[pub_key(self.my_peer)]]
+
+        for peer in self.get_peers():
+            if pub_key(peer) in list(MEMBER_KEYS.keys()):
+                _team[MEMBER_KEYS[pub_key(peer)]] = True
+        print(_team)
+
+        if all(_team.values()):
+            all_team_present = True
+
+
+        if not all_team_present or not self.server_peer:
             print("still waiting on some members and/or the server")
             return
-            
-        [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
+        
+        if len(self.submission_peers) < 2:
+            [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
 
         self.ez_send(self.my_peer, PeerReadyMessage(ready=True))
         self.send_to_peers(PeerReadyMessage(ready=True))
-
+        
         
 
             
@@ -197,14 +225,21 @@ class SubmissionCommunity(Community, PeerObserver):
 
     @lazy_wrapper(PeerReadyMessage)
     def on_peer_ready(self, peer, payload: PeerReadyMessage) -> None:
+        print("[SELF] READYS")
+        
         if not self.is_from_team(peer) or self.registration_complete:
             return
+        
         try:
             self.readys_received[MEMBER_KEYS[pub_key(peer)]] = True
+            for k in self.readys_received:
+                print(f"[SELF] k: {k} val: {self.readys_received[k]}")
+            
         except KeyError:
             print("Member doesn't exist in MEMBER_KEYS")
         
-        if not all(self.readys_received.values()) and len(self.readys_received) != 3:
+
+        if not all(self.readys_received.values()) or len(self.readys_received) != 3:
             return
     
         # here, all peers are ready, so send registration to server
@@ -218,6 +253,9 @@ class SubmissionCommunity(Community, PeerObserver):
                 bytes.fromhex(PUBLIC_KEYS["3"])
             ))
             self.registration_complete = True
+        
+        print("[SELF] submission peers: ", len(self.submission_peers))
+
         
 
     @lazy_wrapper(RegistrationResponse)
@@ -234,6 +272,7 @@ class SubmissionCommunity(Community, PeerObserver):
         # send challenge request
         get_challenge = ChallangeRequest(group_id = self.group_id)
         self.ez_send(self.server_peer, get_challenge)
+
 
     @lazy_wrapper(ChallangeResponse)
     def on_challange_response(self, peer, payload:ChallangeResponse):
@@ -263,10 +302,6 @@ class SubmissionCommunity(Community, PeerObserver):
             self.send_to_peers(payload)
             self.send_to_peers(PeerSolution(signed_nonce, self.round_nr))
         
-        
-
-    
-
 
     @lazy_wrapper(RoundResult)
     def on_round_result(self, peer, payload: RoundResult):
@@ -274,8 +309,27 @@ class SubmissionCommunity(Community, PeerObserver):
         if not is_server(peer):
             return 
         
-        if not peer.payload.success:
-            print("[SERVER]")
+        if not payload.success:
+            print("[SERVER] payload was not successfull")
+
+        if payload.rounds_completed ==3:
+
+            
+            print("[SERVER] - ", payload.message)
+            print("[SELF] All 3 rounds are completed")
+            return
+
+        print("[SERVER] - ", payload.message)
+
+        self.round_nr = payload.rounds_completed + 1
+
+        self.ez_send(peer, PeerRoundResult(
+            payload.success,
+            payload.round_number,
+            payload.rounds_completed,
+            payload.message
+        ))
+
 
     # ---------------------
     # ---group callbacks---
@@ -300,6 +354,25 @@ class SubmissionCommunity(Community, PeerObserver):
         for p in self.submission_peers:
             if pub_key(p) == PUBLIC_KEYS[str(self.round_nr)]:
                 self.ez_send(p, payload)
+
+    @lazy_wrapper(PeerRoundResult)
+    def on_peer_round_result(self, peer, payload:PeerRoundResult):
+        if not self.is_from_team(peer):
+            return
+        
+        if not payload.success:
+            return
+        
+        if payload.rounds_completed == 3:
+            print("[SELF] All 3 rounds are completed")
+            return
+        self.round_nr = payload.rounds_completed
+        if not self.is_my_turn():
+            return
+        
+        self.ez_send(self.server_peer, ChallangeRequest(self.group_id))
+
+
 
     @lazy_wrapper(PeerSolution)
     def on_peer_solution_response(self, peer, payload: PeerSolution):
@@ -333,7 +406,11 @@ class SubmissionCommunity(Community, PeerObserver):
         [self.ez_send(peer, payload) for peer in self.submission_peers]
 
     def is_from_team(self, peer):
-        return pub_key(peer) in map(lambda peer: pub_key(peer), self.submission_peers)
+        return pub_key(peer) in list(MEMBER_KEYS.keys())
+
+    def is_my_turn(self):
+        return self.round_nr == int(MEMBER_KEYS[pub_key(self.my_peer)])
+    
 
 # Helper functions
 
