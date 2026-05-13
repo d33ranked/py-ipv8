@@ -127,6 +127,7 @@ class PeerRoundResult(VariablePayload):
 
 
 class SubmissionCommunity(Community, PeerObserver):
+    
     # community_id
     community_id = bytes.fromhex(COMMUNITY_ID)
     # Global variables
@@ -150,6 +151,7 @@ class SubmissionCommunity(Community, PeerObserver):
         self.add_message_handler(PeerChallangeResponse, self.on_peer_challange_response)
         self.add_message_handler(PeerSolution, self.on_peer_solution_response)
         self.add_message_handler(PeerReadyMessage, self.on_peer_ready)
+        self.add_message_handler(PeerRoundResult, self.on_peer_round_result)
 
         self.readys_received["1"] = False
         self.readys_received["2"] = False
@@ -192,7 +194,9 @@ class SubmissionCommunity(Community, PeerObserver):
             self.server_peer = peer
 
 
-        
+        if pub_key(peer) in list(MEMBER_KEYS.keys()):
+            self.submission_peers.append(peer)
+
         all_team_present = False
         
 
@@ -212,11 +216,6 @@ class SubmissionCommunity(Community, PeerObserver):
             print("still waiting on some members and/or the server")
             return
         
-        if len(self.submission_peers) < 2:
-            # append to submission_peers
-            for peer in self.get_peers():
-                if pub_key(peer) in MEMBER_KEYS.keys():
-                    self.submission_peers.append(peer) 
 
         self.ez_send(self.my_peer, PeerReadyMessage(ready=True))
         self.send_to_peers(PeerReadyMessage(ready=True))
@@ -316,10 +315,9 @@ class SubmissionCommunity(Community, PeerObserver):
         
         if not payload.success:
             print("[SERVER] payload was not successfull")
+            return
 
         if payload.rounds_completed ==3:
-
-            
             print("[SERVER] - ", payload.message)
             print("[SELF] All 3 rounds are completed")
             return
@@ -328,12 +326,15 @@ class SubmissionCommunity(Community, PeerObserver):
 
         self.round_nr = payload.rounds_completed + 1
 
-        self.ez_send(peer, PeerRoundResult(
+        self.send_to_peers(PeerRoundResult(
             payload.success,
             payload.round_number,
             payload.rounds_completed,
             payload.message
         ))
+
+        print("[SELF] - Sending PeerRoundResult to peers")
+
 
 
     # ---------------------
@@ -362,6 +363,7 @@ class SubmissionCommunity(Community, PeerObserver):
 
     @lazy_wrapper(PeerRoundResult)
     def on_peer_round_result(self, peer, payload:PeerRoundResult):
+        print("[PEER] Received PeerRoundResult")
         if not self.is_from_team(peer):
             return
         
@@ -371,10 +373,13 @@ class SubmissionCommunity(Community, PeerObserver):
         if payload.rounds_completed == 3:
             print("[SELF] All 3 rounds are completed")
             return
-        self.round_nr = payload.rounds_completed
+        self.round_nr = payload.rounds_completed + 1
+
         if not self.is_my_turn():
+            print("[SELF] Not our turn, waiting...")
             return
         
+        print("[SELF] Our turn, sending the challange request.")
         self.ez_send(self.server_peer, ChallangeRequest(self.group_id))
 
 
@@ -404,6 +409,7 @@ class SubmissionCommunity(Community, PeerObserver):
                 self.solution_dict["2"],
                 self.solution_dict["3"]
             )
+
             self.ez_send(self.server_peer, to_send)
 
     # Helper functions
