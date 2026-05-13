@@ -154,6 +154,11 @@ class SubmissionCommunity(Community, PeerObserver):
         self.readys_received["1"] = False
         self.readys_received["2"] = False
         self.readys_received["3"] = False
+
+        self._team = dict()
+        self._team["1"] = False
+        self._team["2"] = False
+        self._team["3"] = False
         # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
     
 
@@ -187,22 +192,19 @@ class SubmissionCommunity(Community, PeerObserver):
             self.server_peer = peer
 
 
-        peers = all_peers(self)
         
         all_team_present = False
-        _team = dict()
-        _team["1"] = False
-        _team["2"] = False
-        _team["3"] = False
+        
 
-        _team[MEMBER_KEYS[pub_key(self.my_peer)]]
+        self._team[MEMBER_KEYS[pub_key(self.my_peer)]] = True
 
-        for peer in self.get_peers():
-            if pub_key(peer) in list(MEMBER_KEYS.keys()):
-                _team[MEMBER_KEYS[pub_key(peer)]] = True
-        print(_team)
+        
+        if pub_key(peer) in list(MEMBER_KEYS.keys()):
+            self._team[MEMBER_KEYS[pub_key(peer)]] = True
 
-        if all(_team.values()):
+        print(self._team)
+
+        if all(self._team.values()):
             all_team_present = True
 
 
@@ -211,7 +213,10 @@ class SubmissionCommunity(Community, PeerObserver):
             return
         
         if len(self.submission_peers) < 2:
-            [self.submission_peers.append(peer) for peer in self.get_peers() if pub_key(peer) in MEMBER_KEYS.keys()]# append to submission_peers
+            # append to submission_peers
+            for peer in self.get_peers():
+                if pub_key(peer) in MEMBER_KEYS.keys():
+                    self.submission_peers.append(peer) 
 
         self.ez_send(self.my_peer, PeerReadyMessage(ready=True))
         self.send_to_peers(PeerReadyMessage(ready=True))
