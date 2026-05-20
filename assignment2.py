@@ -12,7 +12,9 @@ from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, defaul
 from ipv8.lazy_community import lazy_wrapper
 from ipv8.messaging.chronos_payload import ChronosPayloadWID
 from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
+from ipv8.messaging.payload import IntroductionRequestPayload
 from ipv8.messaging.payload_dataclass import DataClassPayload
+from ipv8.messaging.payload_headers import GlobalTimeDistributionPayload
 from ipv8.messaging.serialization import Payload
 from ipv8.peer import Peer
 from ipv8.peerdiscovery.discovery import DiscoveryStrategy
@@ -49,7 +51,7 @@ PUBLIC_KEYS = {
 }
 
 MEMBER_KEYS = {
-    "4c69624e61434c504b3aa3387dfd20b578dfce201978aea6f25dfa3b3127e6825ce7bd2fb8ce07797f7c8bf427fa376e6eaf58391430e63eb86dc93aebb3f68c89bc9d99c63882034a90": "1",
+    "4c69624e61434c504b3aa3387dfd20b578dfce201978aea6f25dfa3b17April20263127e6825ce7bd2fb8ce07797f7c8bf427fa376e6eaf58391430e63eb86dc93aebb3f68c89bc9d99c63882034a90": "1",
     "4c69624e61434c504b3acb4cf8cd94d4c0b6513dde5ac3e713421243fe03acd9f81c44a3c59d665af57e9372a84599691d8ca03efbe0095cc5eb4a14d68700ab81356a4da03be942c848": "2",
     "4c69624e61434c504b3af9e8ecfcb5968c5438c65adf621afcb336895329da741ef0e1ff846db37f3a1dd4188afcad7d8f8a890571930a4bb7b982904911437c2aba97922746c5fdb176": "3"
 }
@@ -162,6 +164,14 @@ class SubmissionCommunity(Community, PeerObserver):
         self._team["2"] = False
         self._team["3"] = False
         # self.register_task("check_solutions", self.check_solutions, interval = 0.1)
+
+    def introduction_request_callback(
+            self, peer: Peer,
+            dist: GlobalTimeDistributionPayload,
+            payload: IntroductionRequestPayload
+    ) -> None: 
+        pass
+        
     
 
 
@@ -172,9 +182,6 @@ class SubmissionCommunity(Community, PeerObserver):
         print("starting a peer listener")
         print("my key:", "..." + pub_key(self.my_peer)[-TAIL_N:])
         self.network.add_peer_observer(self)
-
-    
-
 
 
     # --------------------

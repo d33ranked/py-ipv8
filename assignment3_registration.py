@@ -4,18 +4,14 @@ from functools import reduce
 import hashlib
 import operator
 import os
-from random import choice, random
 import time
 from typing import cast
 from ipv8.community import Community, CommunitySettings
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
 from ipv8.lazy_community import lazy_wrapper
-from ipv8.messaging.chronos_payload import ChronosPayloadWID
 from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
-from ipv8.messaging.payload_dataclass import DataClassPayload
-from ipv8.messaging.serialization import Payload
+
 from ipv8.peer import Peer
-from ipv8.peerdiscovery.discovery import DiscoveryStrategy
 from ipv8.peerdiscovery.network import PeerObserver
 from ipv8.requestcache import RandomNumberCacheWithName, RequestCache
 from ipv8.util import run_forever
@@ -31,9 +27,11 @@ load_dotenv()
 UNI_EMAIL = os.getenv("UNI_EMAIL")
 KEY_PATH = os.getenv("KEY_PATH")
 
-SERVER_PUB_KEY = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
+
+GROUP_ID = "814ee89d4621f005"
+SERVER_PUB_KEY = "4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1bd4350ffde518068a0d246344b10d0d8c355fd0d76873e7d7f7838f3715e025af08f791324495e083331ce6"
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
-COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
+COMMUNITY_ID = "4c616233426c6f636b636861696e323032365057"
 BLOCKCHAIN_COMMUNITY_ID = "0000FFFF0000FFFF0000FFFF0000FFFF0000FFFF"
 
 
@@ -54,44 +52,26 @@ LAST_N = 5
 
 
 @vp_compile
-class SubmitTransaction(VariablePayload):
+class Register(VariablePayload):
+    """
+    Registration request sent by a group member to join the server.
+    """
     msg_id = 1
-    format_list = ["varlenH", "varlenH", "q", "varlenH"]
-    names = ["sender_key", "data", "timestamp", "signature"]
+    format_list = ["varlenHutf8", "varlenH"]
+    names = ["group_id", "community_id"]
 
 @vp_compile
-class SubmitTransactionResponse(VariablePayload):
+class RegisterResponse(VariablePayload):
+    """
+    Response from the server indicating if registration was successful.
+    """
     msg_id = 2
-    format_list = ["?", "varlenH", "varlenHutf8"]
-    names = ["success", "tx_hash", "message"]
+    format_list = ["?", "varlenHutf8"]
+    names = ["success", "message"]
 
-@vp_compile
-class GetChainHeight(VariablePayload):
-    msg_id = 3
-    format_list = ["q"]
-    names = ["request_id"]
 
-@vp_compile
-class ChainHeightResponse(VariablePayload):
-    msg_id = 4
-    format_list = ["q", "q", "varlenH"]
-    names = ["request_id", "height", "tip_hash"]
 
-@vp_compile
-class GetBlock(VariablePayload):
-    msg_id = 5
-    format_list = ["q"]
-    names = ["height"]
-
-@vp_compile
-class BlockResponse(VariablePayload):
-    msg_id = 6
-    format_list = ["q", "varlenH", "varlenH", "q", "q", "q", "varlenH", "varlenH"]
-    names = [
-        "height", "prev_hash", "txs_hash", "timestamp", 
-        "difficulty", "nonce", "block_hash", "tx_hashes"
-    ]
-
+        
 
 #from ipv8.
 
@@ -114,16 +94,37 @@ class BlockchainCommunity(Community, PeerObserver):
         print("starting a peer listener")
         print("my key", pub_key(self.my_peer))
         self.network.add_peer_observer(self)
+        self.add_message_handler(RegisterResponse, self.handle_regestration_response)
         
 
     def on_peer_added(self, peer):
         print("peer added: ", peer)
         print("Pkey ->", pub_key(peer, True))
 
-        if pub_key(peer) in list(MEMBER_KEYS.keys()):
-            self.handle_teammate(peer)
+        if pub_key(peer) == str(SERVER_PUB_KEY):
+            self.send_register(peer)
         
 
+
+        if pub_key(peer) in list(MEMBER_KEYS.keys()):
+            self.handle_teammate(peer)
+
+    def on_peer_removed(self, peer):
+        print("PEER REMOVED")
+    
+
+    def send_register(self, peer: Peer):
+        self.ez_send(peer, Register(
+                GROUP_ID, 
+                bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
+        ))
+
+    @lazy_wrapper(RegisterResponse)
+    def handle_regestration_response(self, peer, payload):
+        if not payload.success:
+            print("[SERVER] Registration Failed")
+
+        print(f"[SERVER] msg: {payload.message}")
     def handle_teammate(self, peer):
 
         self.register_task("start_heartbeat", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
@@ -131,6 +132,12 @@ class BlockchainCommunity(Community, PeerObserver):
 
     def send_heartbeat(self, peer: Peer):
         peer.ez_send()
+
+
+    def hard_send(self, peer: Peer):
+        pass
+
+
 
 
 
@@ -148,7 +155,12 @@ def all_peers(community: Community) -> list[Peer]:
     return all_peers
 
 def pub_key(peer, short=False):
-    return not short and peer.public_key.key_to_bin().hex() or short and peer.public_key.key_to_bin().hex()[-LAST_N:]
+    key = peer.public_key.key_to_bin().hex()
+    if short:
+        key = key[-LAST_N:]
+
+
+    return key
 
 def is_server(peer):
     return peer.mid == SERVER_PUB_KEY_SHA1

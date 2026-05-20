@@ -28,6 +28,9 @@ class SubmissionCommunityTests(TestBase[SubmissionCommunity]):
         super().setUp()
         # Create 1 MyCommunity
         self.initialize(SubmissionCommunity, 5)
+
+        
+
         # Nodes are 0-indexed
         SERVER_PUB_KEY = self.peer(0).public_key.key_to_bin().hex()
         SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
@@ -75,13 +78,16 @@ class SubmissionCommunityTests(TestBase[SubmissionCommunity]):
     # Tests wether the server peer is initialized correctly for peer 1 after peer discovery.
     async def test_server_var_init(self) -> None:
         
+        
         self.overlay(0).send_introduction_request(self.peer(1))
+        await self.introduce_nodes()
         
         await self.deliver_messages()
         self.assertEqual(
             self.key_bin(0).hex(), 
             self.overlay(1).server_peer.public_key.key_to_bin().hex()
         )
+        
         
 
     # 
