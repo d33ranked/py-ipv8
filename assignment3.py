@@ -52,6 +52,27 @@ MEMBER_KEYS = {
 LASTSENT = "_lastsent"
 LAST_N = 5
 
+@dataclass
+class Transaction:
+    sender_key: bytes
+    data: bytes
+    timestamp: bytes
+    signature: bytes
+    tx_hash: bytes
+
+@dataclass
+class BlockHeader:
+    prev_hash: bytes
+    txs_hash: bytes
+    timestamp: bytes
+    difficulty: bytes
+    nonce: bytes
+
+@dataclass
+class Block:
+    header: BlockHeader
+    block_hash: bytes
+    tx_hashes: bytes
 
 @vp_compile
 class SubmitTransaction(VariablePayload):
@@ -93,7 +114,14 @@ class BlockResponse(VariablePayload):
     ]
 
 
-#from ipv8.
+# TODO: this block should also be mined to find a hash?
+GENESIS_BLOCK = Block(
+    BlockHeader(b"", hashlib.sha256(b"").digest(), b"", b"", b""),
+    b"",
+    b""
+)
+
+DIFFICULTY = bytes.fromhex("0000000f" + "f" * 56)
 
 
 class BlockchainCommunity(Community, PeerObserver):
@@ -107,7 +135,16 @@ class BlockchainCommunity(Community, PeerObserver):
 
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
-        # Register the handler for the server's response    
+
+        self.mempool = []
+        # Q: Should the chain be saved and loaded from disk?
+        self.blockchain = [GENESIS_BLOCK]
+        self.next_block = self.gen_next_empty_block()
+
+        # Register the handler for the server's response
+        self.add_message_handler(SubmitTransaction, self.on_submit_tx)
+        self.add_message_handler(GetChainHeight, self.on_get_chain_height)
+        self.add_message_handler(GetBlock, self.on_get_block)
 
     def started(self) -> None:
         print("starting submition community")
@@ -122,6 +159,11 @@ class BlockchainCommunity(Community, PeerObserver):
 
         if pub_key(peer) in list(MEMBER_KEYS.keys()):
             self.handle_teammate(peer)
+
+        # Find the server and the other 2 group members
+        # Then we can start
+        # Q: Or can we start only knowing the server and not the other miners?
+
         
 
     def handle_teammate(self, peer):
@@ -133,12 +175,125 @@ class BlockchainCommunity(Community, PeerObserver):
         peer.ez_send()
 
 
+    # TODO call this function in some way, probably in a thread
+    def mine_block(self):
+        self.next_block.header.txs_hash = hashlib.sha256(self.next_block.tx_hashes).digest()
+        timestamp_int = int(time.time())
+        self.next_block.header.timestamp = timestamp_int.to_bytes(length=8, byteorder="big")
+        self.next_block.header.prev_hash = self.blockchain[-1].block_hash
+        nonce = 0
+
+        while True:
+            self.next_block.header.nonce = nonce.to_bytes(length=8, byteorder="big")
+            self.next_block.block_hash = hashlib.sha256(self.next_block.header).digest() # Q: does this get header bytes as it should?
+
+            if self.next_block.block_hash < self.next_block.header.difficulty:
+                # Mined!
+                self.blockchain.append(self.next_block)
+                self.next_block = self.gen_next_empty_block()
+
+                # Tell my peers that I mined it
+                # TODO do something with mempool?
+
+            nonce += 1
+
+    # Handlers
+
+    @lazy_wrapper(SubmitTransaction)
+    def on_submit_tx(self, peer, payload: SubmitTransaction) -> None:
+        if not is_server(peer):
+            return
+
+        # Reconstruct the public key object
+        pk_bytes = payload.sender_key
+        data_bytes = payload.data
+        timestamp_bytes = int.to_bytes(payload.timestamp, length=8, byteorder="big")
+        sig_bytes = payload.signature
+        public_key_obj = self.crypto.key_from_public_bin(payload.sender_key)
+
+        # Verify the signature
+        is_valid = self.crypto.is_valid_signature(
+            public_key_obj,
+            pk_bytes + data_bytes + timestamp_bytes,
+            sig_bytes
+        )
+
+        response = None
+        hash = hashlib.sha256(pk_bytes + data_bytes + timestamp_bytes + sig_bytes).digest()
+
+        if is_valid:
+            print("✓ Valid signature")
+            tx = Transaction(pk_bytes, data_bytes, timestamp_bytes, sig_bytes, hash)
+
+            # Q: When do we start mining? Once a certain number of Txs is in the pool?
+            # TODO: Change later
+            # For now, simply add to both pool and current block
+            self.next_block.tx_hashes += hash
+
+            self.mempool.append(tx)
+            response = SubmitTransactionResponse(success=True, tx_hash=hash, message="Added transaction to pool")
+        else:
+            print("✗ Invalid signature")
+            response = SubmitTransactionResponse(success=False, tx_hash=hash, message="Invalid signature")
+
+
+
+        self.ez_send(peer, response)
+
+    @lazy_wrapper(GetChainHeight)
+    def on_get_chain_height(self, peer, payload: GetChainHeight) -> None:
+        if not is_server(peer):
+            return
+
+        height = len(self.blockchain) - 1
+        tip_hash = self.blockchain[-1].block_hash
+        response = ChainHeightResponse(payload.request_id, height, tip_hash)
+
+        self.ez_send(peer, response)
+
+    @lazy_wrapper(GetBlock)
+    def on_get_block(self, peer, payload: GetBlock) -> None:
+        if not is_server(peer):
+            return
+
+        height = payload.height
+
+        if height < 0 or height >= len(self.blockchain):
+            return
+
+        block = self.blockchain[height]
+        response = BlockResponse(
+            height = block.header.height,
+            prev_hash = block.header.prev_hash,
+            txs_hash = block.header.txs_hash,
+            timestamp = block.header.timestamp,
+            difficulty = block.header.difficulty,
+            nonce = block.header.nonce,
+            block_hash = block.block_hash,
+            tx_hash = block.tx_hashes
+        )
+
+        self.ez_send(peer, response)
 
 
 
     # Helper functions
     def send_to_peers(self, payload):
         [self.ez_send(peer, payload) for peer in self.submission_peers]
+
+    def gen_next_empty_block(self):
+        return (
+            Block(
+                BlockHeader(
+                    prev_hash=self.blockchain[-1].block_hash,
+                    txs_hash=b"",
+                    timestamp=b"",
+                    difficulty=DIFFICULTY,
+                    nonce=b""
+                ),
+                block_hash=b"",
+                tx_hashes=b""
+            ))
 
 # Helper functions
 
