@@ -1,3 +1,4 @@
+import asyncio
 from asyncio import run
 from dataclasses import dataclass
 from functools import reduce
@@ -59,6 +60,7 @@ class Transaction:
     timestamp: bytes
     signature: bytes
     tx_hash: bytes
+    status: str
 
 @dataclass
 class BlockHeader:
@@ -73,6 +75,7 @@ class Block:
     header: BlockHeader
     block_hash: bytes
     tx_hashes: bytes
+    n_txs: int
 
 @vp_compile
 class SubmitTransaction(VariablePayload):
@@ -113,12 +116,20 @@ class BlockResponse(VariablePayload):
         "difficulty", "nonce", "block_hash", "tx_hashes"
     ]
 
+@vp_compile
+class BlockMined(VariablePayload):
+    msg_id = 7
+    format_list = ["q", "varlenH", "varlenH", "q", "q", "q", "varlenH", "varlenH"]
+    names = [
+        "height", "prev_hash", "txs_hash", "timestamp",
+        "difficulty", "nonce", "block_hash", "tx_hashes"
+    ]
 
-# TODO: this block should also be mined to find a hash?
 GENESIS_BLOCK = Block(
     BlockHeader(b"", hashlib.sha256(b"").digest(), b"", b"", b""),
     b"",
-    b""
+    b"",
+    0
 )
 
 DIFFICULTY = bytes.fromhex("0000000f" + "f" * 56)
@@ -137,14 +148,17 @@ class BlockchainCommunity(Community, PeerObserver):
         super().__init__(settings)
 
         self.mempool = []
-        # Q: Should the chain be saved and loaded from disk?
-        self.blockchain = [GENESIS_BLOCK]
-        self.next_block = self.gen_next_empty_block()
+        self.txs_per_block = 0 # 0 first because it's the genesis block, this is later changed
+
+        # TODO: Should the chain be saved and loaded from disk?
+        self.blockchain = []
+        self.next_block = GENESIS_BLOCK
 
         # Register the handler for the server's response
         self.add_message_handler(SubmitTransaction, self.on_submit_tx)
         self.add_message_handler(GetChainHeight, self.on_get_chain_height)
         self.add_message_handler(GetBlock, self.on_get_block)
+        self.add_message_handler(BlockMined, self.on_block_mined)
 
     def started(self) -> None:
         print("starting submition community")
@@ -160,7 +174,7 @@ class BlockchainCommunity(Community, PeerObserver):
         if pub_key(peer) in list(MEMBER_KEYS.keys()):
             self.handle_teammate(peer)
 
-        # Find the server and the other 2 group members
+        # TODO Find the server and the other 2 group members -> Danil
         # Then we can start
         # Q: Or can we start only knowing the server and not the other miners?
 
@@ -175,7 +189,6 @@ class BlockchainCommunity(Community, PeerObserver):
         peer.ez_send()
 
 
-    # TODO call this function in some way, probably in a thread
     def mine_block(self):
         self.next_block.header.txs_hash = hashlib.sha256(self.next_block.tx_hashes).digest()
         timestamp_int = int(time.time())
@@ -189,11 +202,30 @@ class BlockchainCommunity(Community, PeerObserver):
 
             if self.next_block.block_hash < self.next_block.header.difficulty:
                 # Mined!
-                self.blockchain.append(self.next_block)
-                self.next_block = self.gen_next_empty_block()
 
-                # Tell my peers that I mined it
-                # TODO do something with mempool?
+                # Now this can go to the real number because we're sure the genesis block was mined
+                self.txs_per_block = 4
+
+                self.blockchain.append(self.next_block)
+
+                for tx in self.mempool:
+                    if tx.hash in self.next_block.tx_hashes:
+                        tx.status = "IN-MINED-BLOCK" # Or, could delete, but need to be careful because maybe the final chain will not have it
+
+                block_mined_res = BlockMined(
+                    height=self.next_block.header.height,
+                    prev_hash=self.next_block.header.prev_hash,
+                    txs_hash=self.next_block.header.txs_hash,
+                    timestamp=self.next_block.header.timestamp,
+                    difficulty=self.next_block.header.difficulty,
+                    nonce=self.next_block.header.nonce,
+                    block_hash=self.next_block.block_hash,
+                    tx_hash=self.next_block.tx_hashes
+                )
+
+                # TODO Tell my peers that I mined it -> Danil
+
+                self.next_block = self.gen_next_block()
 
             nonce += 1
 
@@ -223,20 +255,21 @@ class BlockchainCommunity(Community, PeerObserver):
 
         if is_valid:
             print("✓ Valid signature")
-            tx = Transaction(pk_bytes, data_bytes, timestamp_bytes, sig_bytes, hash)
-
-            # Q: When do we start mining? Once a certain number of Txs is in the pool?
-            # TODO: Change later
-            # For now, simply add to both pool and current block
-            self.next_block.tx_hashes += hash
-
+            tx = Transaction(pk_bytes, data_bytes, timestamp_bytes, sig_bytes, hash, "IN-POOL")
             self.mempool.append(tx)
+
+            if self.next_block.n_txs < self.txs_per_block:
+                tx.status = "IN-PENDING-BLOCK"
+                self.next_block.tx_hashes += hash
+                self.next_block.n_txs += 1
+
+                if self.next_block.n_txs == self.txs_per_block:
+                    task = asyncio.create_task(self.mine_block()) # TODO Not sure about this
+
             response = SubmitTransactionResponse(success=True, tx_hash=hash, message="Added transaction to pool")
         else:
             print("✗ Invalid signature")
             response = SubmitTransactionResponse(success=False, tx_hash=hash, message="Invalid signature")
-
-
 
         self.ez_send(peer, response)
 
@@ -275,13 +308,38 @@ class BlockchainCommunity(Community, PeerObserver):
 
         self.ez_send(peer, response)
 
+    @lazy_wrapper(BlockMined)
+    def on_block_mined(self, peer, payload: BlockMined) -> None:
+        # if not coming from group, early return
+
+        # Now this can go to the real number because we're sure the genesis block was mined
+        self.txs_per_block = 4
+
+        # Reset txs from mempool back to IN-POOL
+
+        self.next_block = self.gen_next_block()
+
+        pass
 
 
     # Helper functions
     def send_to_peers(self, payload):
         [self.ez_send(peer, payload) for peer in self.submission_peers]
 
-    def gen_next_empty_block(self):
+    def gen_next_block(self):
+        tx_hashes = b""
+        n_txs = 0
+
+        # Add txs from mempool
+        for tx in self.mempool:
+            if n_txs >= self.txs_per_block:
+                break
+
+            if tx.status == "IN-POOL":
+                tx_hashes += tx.hash
+                tx.status = "IN-PENDING-BLOCK"
+                n_txs += 1
+
         return (
             Block(
                 BlockHeader(
@@ -292,7 +350,8 @@ class BlockchainCommunity(Community, PeerObserver):
                     nonce=b""
                 ),
                 block_hash=b"",
-                tx_hashes=b""
+                tx_hashes=tx_hashes,
+                n_txs = n_txs
             ))
 
 # Helper functions
