@@ -125,6 +125,18 @@ class BlockMined(VariablePayload):
         "difficulty", "nonce", "block_hash", "tx_hashes"
     ]
 
+@vp_compile
+class HeartbeatRequest(VariablePayload):
+    msg_id = 8
+    format_list = ["q"]
+    names = ["default"]
+
+@vp_compile
+class HeartbeatResponse(VariablePayload):
+    msg_id = 9
+    format_list = ["q"]
+    names = ["default"]
+
 GENESIS_BLOCK = Block(
     BlockHeader(b"", hashlib.sha256(b"").digest(), b"", b"", b""),
     b"",
@@ -137,7 +149,8 @@ DIFFICULTY = bytes.fromhex("0000000f" + "f" * 56)
 
 class BlockchainCommunity(Community, PeerObserver):
     # -- Community-related constants here
-    HEARTBEAT_INTERVAL = 30 # 30 seconds
+    HEARTBEAT_INTERVAL = 15 # 15 seconds
+    HEARTBEAT_TIMEOUT = 30
 
     # -- Rest of the varialbes here
     community_id = bytes.fromhex(COMMUNITY_ID)
@@ -160,6 +173,10 @@ class BlockchainCommunity(Community, PeerObserver):
         self.add_message_handler(GetBlock, self.on_get_block)
         self.add_message_handler(BlockMined, self.on_block_mined)
 
+        # Heartbeats
+        self.add_message_handler(HeartbeatRequest, self.on_heartbeat_request)
+        self.add_message_handler(HeartbeatResponse, self.on_heartbeat_response)
+
     def started(self) -> None:
         print("starting submition community")
         print("starting a peer listener")
@@ -179,14 +196,31 @@ class BlockchainCommunity(Community, PeerObserver):
         # Q: Or can we start only knowing the server and not the other miners?
 
         
-
+    # here we register a task which will be monitor heartbeats.
     def handle_teammate(self, peer):
-
-        self.register_task("start_heartbeat", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
+        peer_id = MEMBER_KEYS[pub_key(peer)]
+        self.register_task(f"heartbeat_send_{peer_id}", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
 
 
     def send_heartbeat(self, peer: Peer):
-        peer.ez_send()
+        peer.ez_send(HeartbeatRequest(0))
+
+    @lazy_wrapper(HeartbeatRequest)
+    def on_heartbeat_request(self, peer: Peer, payload: HeartbeatRequest):
+        peer.ez_send(HeartbeatResponse(0))
+
+    @lazy_wrapper(HeartbeatResponse)
+    def on_heartbeat_response(self, peer: Peer, payload: HeartbeatResponse):
+        peer_id = MEMBER_KEYS[pub_key(peer)]
+        task_id = f"heartbeat_timeout_{peer_id}"
+        heartbeat_task = self.get_task(task_id)
+        if heartbeat_task:
+            heartbeat_task.cancel()
+
+        self.register_task(task_id, self.on_heartbeat_expired, peer, interval=self.HEARTBEAT_TIMEOUT)
+        
+
+    def on_heartbeat_expired(self, peer):
 
 
     def mine_block(self):
@@ -362,7 +396,10 @@ def all_peers(community: Community) -> list[Peer]:
     return all_peers
 
 def pub_key(peer, short=False):
-    return not short and peer.public_key.key_to_bin().hex() or short and peer.public_key.key_to_bin().hex()[-LAST_N:]
+    p_key = peer.public_key.key_to_bin().hex()
+    if short:
+        p_key = p_key[-LAST_N:]
+    return p_key
 
 def is_server(peer):
     return peer.mid == SERVER_PUB_KEY_SHA1
