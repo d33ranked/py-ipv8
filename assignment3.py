@@ -28,6 +28,13 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+import logging
+
+# Create a logger specific to this file/module
+logger = logging.getLogger(__name__)
+
+
+
 #CHANGE THIS TO YOUR OWN EMAIL
 UNI_EMAIL = os.getenv("UNI_EMAIL")
 KEY_PATH = os.getenv("KEY_PATH")
@@ -155,15 +162,22 @@ class BlockchainCommunity(Community, PeerObserver):
     # -- Rest of the varialbes here
     community_id = bytes.fromhex(COMMUNITY_ID)
     server_peer = None
+    team_peers = dict # dictionary that stores MEMBER_ID as key and peer object as value
 
 
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
+        # add our own peer
+        self.team_peers[MEMBER_KEYS[pub_key(self.my_peer)]] = pub_key(self.my_peer)
 
         self.mempool = []
         self.txs_per_block = 0 # 0 first because it's the genesis block, this is later changed
 
-        # TODO: Should the chain be saved and loaded from disk?
+        # Q: Should the chain be saved and loaded from disk?
+        # ANS: No,
+        # the idea is that the chain would only be kept alive in an actual blockchain by at least one living peer.
+        # Could be a cool extension idea though.
+
         self.blockchain = []
         self.next_block = GENESIS_BLOCK
 
@@ -191,6 +205,11 @@ class BlockchainCommunity(Community, PeerObserver):
         if pub_key(peer) in list(MEMBER_KEYS.keys()):
             self.handle_teammate(peer)
 
+        if is_server(peer):
+            self.server_peer = peer
+
+        
+
         # TODO Find the server and the other 2 group members -> Danil
         # Then we can start
         # Q: Or can we start only knowing the server and not the other miners?
@@ -199,6 +218,7 @@ class BlockchainCommunity(Community, PeerObserver):
     # here we register a task which will be monitor heartbeats.
     def handle_teammate(self, peer):
         peer_id = MEMBER_KEYS[pub_key(peer)]
+        self.team_peers[peer_id] = peer
         self.register_task(f"heartbeat_send_{peer_id}", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
 
 
@@ -221,6 +241,10 @@ class BlockchainCommunity(Community, PeerObserver):
         
 
     def on_heartbeat_expired(self, peer):
+        # Log the warning using lazy evaluation
+        logger.warning(f"heartbeat of {pub_key(peer)} expired, deleting peer.")
+        self.team_peers.pop(MEMBER_KEYS[pub_key(peer)], None)
+
 
 
     def mine_block(self):

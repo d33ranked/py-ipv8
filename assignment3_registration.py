@@ -83,6 +83,7 @@ class BlockchainCommunity(Community, PeerObserver):
     # -- Rest of the varialbes here
     community_id = bytes.fromhex(COMMUNITY_ID)
     server_peer = None
+    
 
 
     def __init__(self, settings: CommunitySettings):
@@ -104,13 +105,11 @@ class BlockchainCommunity(Community, PeerObserver):
         if pub_key(peer) == str(SERVER_PUB_KEY):
             self.send_register(peer)
         
-
-
         if pub_key(peer) in list(MEMBER_KEYS.keys()):
             self.handle_teammate(peer)
 
     def on_peer_removed(self, peer):
-        print("PEER REMOVED")
+        print(f"PEER {pub_key(peer)} REMOVED")
     
 
     def send_register(self, peer: Peer):
