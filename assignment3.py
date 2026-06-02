@@ -1,5 +1,5 @@
 import asyncio
-from asyncio import run
+from asyncio import run, sleep
 from dataclasses import dataclass
 from functools import reduce
 import hashlib
@@ -84,6 +84,7 @@ class Block:
     block_hash: bytes
     tx_hashes: bytes
     n_txs: int
+
 @vp_compile
 class Register(VariablePayload):
     """
@@ -101,6 +102,15 @@ class RegisterResponse(VariablePayload):
     msg_id = 2
     format_list = ["?", "varlenHutf8"]
     names = ["success", "message"]
+
+@vp_compile
+class ReadyMessage(VariablePayload):
+    """
+    Response from the server indicating if registration was successful.
+    """
+    msg_id = 3
+    format_list = ["?"]
+    names = ["ready"]
 
 @vp_compile
 class SubmitTransaction(VariablePayload):
@@ -179,14 +189,16 @@ class BlockchainCommunity(Community, PeerObserver):
 
     # -- Rest of the varialbes here
     community_id = bytes.fromhex(COMMUNITY_ID)
-    server_peer = None
-    team_peers = dict # dictionary that stores MEMBER_ID as key and peer object as value
+    
+    # shared variables
 
 
-    def __init__(self, settings: CommunitySettings):
-        super().__init__(settings)
+    def __init__(self, settings: CommunitySettings, *args, **kwargs):
+        super().__init__(settings, *args, **kwargs)
+
         # add our own peer
-        self.team_peers[MEMBER_KEYS[pub_key(self.my_peer)]] = pub_key(self.my_peer)
+        self.team_peers = getattr(settings, "team_peers", {})
+        self.server_peer = getattr(settings, "server_peer", {})
 
         self.mempool = []
         self.txs_per_block = 0 # 0 first because it's the genesis block, this is later changed
@@ -209,6 +221,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self.add_message_handler(HeartbeatRequest, self.on_heartbeat_request)
         self.add_message_handler(HeartbeatResponse, self.on_heartbeat_response)
 
+
     def started(self) -> None:
         print("starting submition community")
         print("starting a peer listener")
@@ -217,22 +230,14 @@ class BlockchainCommunity(Community, PeerObserver):
         
 
     def on_peer_added(self, peer):
-        print("peer added: ", peer)
         print("Pkey ->", pub_key(peer, True))
-
-        if pub_key(peer) in list(MEMBER_KEYS.keys()):
-            self.handle_teammate(peer)
-
-        if is_server(peer):
-            self.server_peer = peer
-
-        
 
         # TODO Find the server and the other 2 group members -> Danil
         # Then we can start
         # Q: Or can we start only knowing the server and not the other miners?
 
-        
+    def on_peer_removed(self, peer):
+        return super().on_peer_removed(peer)
     # here we register a task which will be monitor heartbeats.
     def handle_teammate(self, peer):
         peer_id = MEMBER_KEYS[pub_key(peer)]
@@ -430,6 +435,103 @@ class BlockchainCommunity(Community, PeerObserver):
                 n_txs = n_txs
             ))
 
+
+
+# RegistrationCommunity
+class RegistrationCommunity(Community, PeerObserver):
+    # -- Rest of the varialbes here
+    community_id=bytes.fromhex(COMMUNITY_ID)
+    
+
+
+    def __init__(self, settings: CommunitySettings):
+        super().__init__(settings)
+
+        self.server_peer = getattr(settings, "server_peer", {})
+        self.team_peers = getattr(settings, "team_peers", {})
+        self.registration_complete = getattr(settings, "registration_complete", False)
+
+        # add our own peer
+        our_id = MEMBER_KEYS[pub_key(self.my_peer)]
+        self.team_peers[our_id] = self.my_peer
+        self.team_ready = []
+        self.all_ready = False
+        # Register the handler for the server's response  
+
+    def started(self) -> None:
+        while not self.registration_complete:
+            pass  
+
+
+
+    
+    def check_ready(self):
+
+        if self.server_peer and 3 == len(self.team_ready):
+            self.cancel_pending_task("check_ready")
+            self.registration_complete = True
+
+        
+
+    def on_peer_added(self, peer):
+        print("peer added: ", peer)
+        print("Pkey ->", pub_key(peer, True))
+
+        if is_server(peer):
+            self.server_peer = peer
+
+        if pub_key(peer) in list(MEMBER_KEYS.keys()):
+            self.handle_teammate(peer)
+
+
+    def on_peer_removed(self, peer):
+        print(f"PEER {pub_key(peer)} REMOVED")
+    
+
+    def send_register(self, peer: Peer):
+        self.ez_send(peer, Register(
+            GROUP_ID, 
+            bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
+        ))
+
+    @lazy_wrapper(RegisterResponse)
+    def handle_regestration_response(self, peer, payload):
+        if not payload.success:
+            print("[SERVER] Registration Failed")
+
+        print(f"[SERVER] msg: {payload.message}")
+
+    @lazy_wrapper(ReadyMessage)
+    def on_ready(self, peer, payload: ReadyMessage):
+        if pub_key(peer) not in self.team_ready:
+            self.team_ready.append(pub_key(peer))
+
+
+    def handle_teammate(self, peer):
+        
+        self.team_peers[MEMBER_KEYS[pub_key(peer)]] = peer
+        if len(self.team_peers) == 3:
+            self.send_to_peers()
+        self.register_task("start_heartbeat", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
+
+
+    def send_heartbeat(self, peer: Peer):
+        peer.ez_send()
+
+
+    def hard_send(self, peer: Peer):
+        pass
+
+
+
+
+
+
+
+    # Helper functions
+    def send_to_peers(self, payload):
+        [self.ez_send(peer, payload) for peer in self.submission_peers]
+
 # Helper functions
 
 def all_peers(community: Community) -> list[Peer]:
@@ -444,13 +546,21 @@ def pub_key(peer, short=False):
     return p_key
 
 def is_server(peer):
-    return peer.mid == SERVER_PUB_KEY_SHA1
+    return pub_key(peer) == SERVER_PUB_KEY
 
 async def start_communities():
+
+    shared_state = {
+        "server_peer" :None,
+        "team_peers" :{},
+        "registration_complete": False
+    }
+    
+
     builder = ConfigBuilder().clear_keys().clear_overlays()
     builder.add_key(UNI_EMAIL, "curve25519", KEY_PATH)
     builder.add_overlay(
-        "SubmissionCommunity",
+        "BlockchainCommunity",
         UNI_EMAIL,
         [
             WalkerDefinition
@@ -462,14 +572,35 @@ async def start_communities():
             )
         ],
         default_bootstrap_defs,
-        {},
+        {
+            **shared_state
+        },
+        [("started",)]
+    )
+
+    builder.add_overlay(
+        "RegistrationCommunity",
+        UNI_EMAIL,
+        [
+            WalkerDefinition
+                (
+                Strategy.RandomWalk,
+                10,
+                {"timeout": 3.0}
+
+            )
+        ],
+        default_bootstrap_defs,
+        {
+            **shared_state
+        },
         [("started",)]
     )
 
     ipv8 = IPv8(
         builder.finalize(),
         extra_communities={
-            "SubmissionCommunity": BlockchainCommunity,
+            "BlockchainCommunity": BlockchainCommunity,
             "RegistrationCommunity": RegistrationCommunity
         }
     )

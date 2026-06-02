@@ -1,5 +1,7 @@
 import assignment2
+import assignment3
+
 import assignment3_registration
 
 
-assignment3_registration.main()
+assignment3.main()
