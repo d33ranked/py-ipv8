@@ -39,6 +39,7 @@ logger = logging.getLogger(__name__)
 UNI_EMAIL = os.getenv("UNI_EMAIL")
 KEY_PATH = os.getenv("KEY_PATH")
 
+GROUP_ID = "814ee89d4621f005"
 SERVER_PUB_KEY = "4c69624e61434c504b3a82e33614a342774e084af80835838d6dbdb64a537d3ddb6c1d82011a7f101553cda40cf5fa0e0fc23abd0a9c4f81322282c5b34566f6b8401f5f683031e60c96"
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
 COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
@@ -83,6 +84,23 @@ class Block:
     block_hash: bytes
     tx_hashes: bytes
     n_txs: int
+@vp_compile
+class Register(VariablePayload):
+    """
+    Registration request sent by a group member to join the server.
+    """
+    msg_id = 1
+    format_list = ["varlenHutf8", "varlenH"]
+    names = ["group_id", "community_id"]
+
+@vp_compile
+class RegisterResponse(VariablePayload):
+    """
+    Response from the server indicating if registration was successful.
+    """
+    msg_id = 2
+    format_list = ["?", "varlenHutf8"]
+    names = ["success", "message"]
 
 @vp_compile
 class SubmitTransaction(VariablePayload):
@@ -450,7 +468,10 @@ async def start_communities():
 
     ipv8 = IPv8(
         builder.finalize(),
-        extra_communities={"SubmissionCommunity": BlockchainCommunity}
+        extra_communities={
+            "SubmissionCommunity": BlockchainCommunity,
+            "RegistrationCommunity": RegistrationCommunity
+        }
     )
 
     await ipv8.start()
