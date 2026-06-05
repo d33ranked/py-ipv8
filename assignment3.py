@@ -8,6 +8,7 @@ import os
 from random import choice, random
 import time
 from typing import cast
+from assignment3_registration import RegistrationCommunity
 from ipv8.community import Community, CommunitySettings
 from ipv8.configuration import ConfigBuilder, Strategy, WalkerDefinition, default_bootstrap_defs
 from ipv8.lazy_community import lazy_wrapper
@@ -26,7 +27,7 @@ from ipv8.keyvault.crypto import default_eccrypto
 from ipv8.keyvault.keys import PrivateKey
 from dotenv import load_dotenv
 
-import utils
+from utils import *
 
 load_dotenv()
 

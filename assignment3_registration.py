@@ -1,9 +1,10 @@
-from ipv8.community import Community
+from ipv8.community import Community, CommunitySettings
+from ipv8.lazy_community import lazy_wrapper
 from ipv8.messaging.lazy_payload import VariablePayload, vp_compile
 from ipv8.peer import Peer
 from ipv8.peerdiscovery.network import PeerObserver
 
-import utils
+from utils import *
 
 
 @vp_compile
