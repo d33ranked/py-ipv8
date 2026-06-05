@@ -76,7 +76,7 @@ class RegistrationCommunity(Community, PeerObserver):
 
     def on_peer_added(self, peer):
         print("peer added: ", peer)
-        print("Pkey ->", pub_key(peer, True))
+        print("Pkey ->", pub_key(peer, short=True))
 
         if is_server(peer):
             self.server_peer = peer
