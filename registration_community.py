@@ -39,8 +39,6 @@ class RegistrationCommunity(Community, PeerObserver):
     # -- Rest of the varialbes here
     community_id=bytes.fromhex(COMMUNITY_ID)
     HEARTBEAT_INTERVAL = 30
-    
-
 
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
@@ -60,26 +58,21 @@ class RegistrationCommunity(Community, PeerObserver):
 
     def started(self) -> None:
         print("Started Registration Community.")
-        self.register_task("check_ready", self.check_ready, interval=0.5)
+        self.register_task("check_ready", self.check_ready, interval=2.0)
         self.network.add_peer_observer(self)
-        
 
-
-
-
-
-
-    
     def check_ready(self):
+        print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
         if not self.server_peer or len(self.team_ready) != 3:
             return
 
-
+        print("READYS collected")
         self.cancel_pending_task("check_ready")
-        self.send_register(self.server_peer)
 
-        
+        if is_leader(self.my_peer):
+            print("SENDING REGISTRATION REQUEST")
+            self.send_register(self.server_peer)
 
     def on_peer_added(self, peer):
         print("peer added: ", peer)
@@ -98,12 +91,12 @@ class RegistrationCommunity(Community, PeerObserver):
 
     def send_register(self, peer: Peer):
         self.ez_send(peer, Register(
-            GROUP_ID, 
+            GROUP_ID,
             bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
         ))
 
     @lazy_wrapper(RegisterResponse)
-    def handle_regestration_response(self, peer, payload):
+    def handle_regestration_response(self, peer, payload: RegisterResponse):
         if not payload.success:
             print("[SERVER] Registration Failed")
 
