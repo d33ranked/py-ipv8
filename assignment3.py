@@ -199,6 +199,7 @@ class BlockchainCommunity(Community, PeerObserver):
         # add our own peer
         self.team_peers = getattr(settings, "team_peers", {})
         self.server_peer = getattr(settings, "server_peer", {})
+        self.registration_complete = getattr(settings, "registration_complete", False)
 
         self.mempool = []
         self.txs_per_block = 0 # 0 first because it's the genesis block, this is later changed
@@ -223,10 +224,15 @@ class BlockchainCommunity(Community, PeerObserver):
 
 
     def started(self) -> None:
-        print("starting submition community")
+        print("starting blockchain community")
         print("starting a peer listener")
         print("my key", pub_key(self.my_peer))
-        self.network.add_peer_observer(self)
+        
+        while not self.registration_complete:
+            pass
+
+        print("REGISTRATION COMPLETE")
+
         
 
     def on_peer_added(self, peer):
@@ -459,17 +465,24 @@ class RegistrationCommunity(Community, PeerObserver):
         # Register the handler for the server's response  
 
     def started(self) -> None:
-        while not self.registration_complete:
-            pass  
+        self.register_task("check_ready", self.check_ready, interval=0.5)
+        self.network.add_peer_observer(self)
+        
+
+
+
 
 
 
     
     def check_ready(self):
+        # early return if readys are not recieved or server is not yet found
+        if not self.server_peer or len(self.team_ready) != 3:
+            return
 
-        if self.server_peer and 3 == len(self.team_ready):
-            self.cancel_pending_task("check_ready")
-            self.registration_complete = True
+
+        self.cancel_pending_task("check_ready")
+        self.registration_complete = True
 
         
 
@@ -511,7 +524,7 @@ class RegistrationCommunity(Community, PeerObserver):
         
         self.team_peers[MEMBER_KEYS[pub_key(peer)]] = peer
         if len(self.team_peers) == 3:
-            self.send_to_peers()
+            self.send_to_team(ReadyMessage(True))
         self.register_task("start_heartbeat", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
 
 
@@ -528,12 +541,13 @@ class RegistrationCommunity(Community, PeerObserver):
 
 
 
-    # Helper functions
-    def send_to_peers(self, payload):
-        [self.ez_send(peer, payload) for peer in self.submission_peers]
+    
 
 # Helper functions
+# Helper functions
+def send_to_group(payload, group: list):
 
+    [peer.ez_send(payload) for peer in group]
 def all_peers(community: Community) -> list[Peer]:
     all_peers = community.get_peers()
     all_peers.append(community.my_peer)
