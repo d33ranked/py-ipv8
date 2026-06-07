@@ -10,7 +10,7 @@ from ipv8.test.base import TestBase
 from ipv8.test.mocking.ipv8 import MockIPv8
 
 from blockchain_community import BlockchainCommunity
-
+from utils import *
 
 
 
@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from ipv8.messaging.payload_headers import GlobalTimeDistributionPayload
     from ipv8.peer import Peer
 
-class SubmissionCommunityTests(TestBase[BlockchainCommunityCommunity]):
+class SubmissionCommunityTests(TestBase[BlockchainCommunity]):
     MAX_TEST_TIME = 10
 
     def setUp(self) -> None:
@@ -27,7 +27,7 @@ class SubmissionCommunityTests(TestBase[BlockchainCommunityCommunity]):
         
         super().setUp()
         # Create 1 MyCommunity
-        self.initialize(SubmissionCommunity, 5)
+        self.initialize(BlockchainCommunity, 5)
 
         
 

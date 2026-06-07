@@ -68,11 +68,16 @@ class RegistrationCommunity(Community, PeerObserver):
             return
 
         print("READYS collected")
-        self.cancel_pending_task("check_ready")
+        
 
         if is_leader(self.my_peer):
             print("SENDING REGISTRATION REQUEST")
-            self.send_register(self.server_peer)
+            self.ez_send(self.server_peer, Register(
+                GROUP_ID,
+                bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
+            ))
+            #self.send_register(self.server_peer)
+        self.cancel_pending_task("check_ready")
 
     def on_peer_added(self, peer):
         print("peer added: ", peer)
