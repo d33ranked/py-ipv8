@@ -69,7 +69,7 @@ class RegistrationCommunity(Community, PeerObserver):
         if not self.server_peer or len(self.team_ready) != 3 or not self.blockchain_community_ready:
             return
 
-        print("READYS collected")
+        print("Registration Ready")
         
 
         if is_leader(self.my_peer):
