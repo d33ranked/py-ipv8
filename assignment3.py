@@ -22,8 +22,7 @@ logger = logging.getLogger(__name__)
 async def start_communities():
 
     shared_state = {
-        "server_peer" :None,
-        "team_peers" :{},
+        "blockchain_community_ready" : False,
         "registration_complete": False
     }
 

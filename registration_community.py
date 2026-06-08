@@ -28,7 +28,7 @@ class RegisterResponse(VariablePayload):
 @vp_compile
 class ReadyMessage(VariablePayload):
     """
-    Response from the server indicating if registration was successful.
+    Message which appears from a peer if all team mate peers and server have been discovered
     """
     msg_id = 3
     format_list = ["?"]
@@ -43,10 +43,12 @@ class RegistrationCommunity(Community, PeerObserver):
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
 
-        self.server_peer = getattr(settings, "server_peer")
-        self.team_peers = getattr(settings, "team_peers")
+        
+        self.blockchain_community_ready = getattr(settings, "blockchain_community_ready")
         self.registration_complete = getattr(settings, "registration_complete")
 
+        self.server_peer = None
+        self.team_peers = dict()
         # add our own peer
         our_id = MEMBER_KEYS[pub_key(self.my_peer)]
         self.team_peers[our_id] = self.my_peer
@@ -64,7 +66,7 @@ class RegistrationCommunity(Community, PeerObserver):
     def check_ready(self):
         print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
-        if not self.server_peer or len(self.team_ready) != 3:
+        if not self.server_peer or len(self.team_ready) != 3 or not self.blockchain_community_ready:
             return
 
         print("READYS collected")
@@ -72,11 +74,7 @@ class RegistrationCommunity(Community, PeerObserver):
 
         if is_leader(self.my_peer):
             print("SENDING REGISTRATION REQUEST")
-            self.ez_send(self.server_peer, Register(
-                GROUP_ID,
-                bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
-            ))
-            #self.send_register(self.server_peer)
+            self.send_register(self.server_peer)
         self.cancel_pending_task("check_ready")
 
     def on_peer_added(self, peer):
@@ -86,7 +84,7 @@ class RegistrationCommunity(Community, PeerObserver):
         if is_server(peer):
             self.server_peer = peer
 
-        if pub_key(peer) in list(MEMBER_KEYS.keys()):
+        if is_teammate(peer):
             self.handle_teammate(peer)
 
 

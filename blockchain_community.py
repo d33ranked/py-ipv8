@@ -109,6 +109,16 @@ class HeartbeatResponse(VariablePayload):
     format_list = ["q"]
     names = ["default"]
 
+@vp_compile
+class ReadyMessage(VariablePayload):
+    """
+    Message which appears from a peer if all team mate peers have been discovered
+    """
+    msg_id = 10
+    format_list = ["?"]
+    names = ["ready"]
+
+
 GENESIS_BLOCK = Block(
     BlockHeader(b"", hashlib.sha256(b"").digest(), b"", b"", b""),
     b"",
@@ -132,9 +142,16 @@ class BlockchainCommunity(Community, PeerObserver):
         super().__init__(settings, *args, **kwargs)
 
         # shared variables
-        self.team_peers = getattr(settings, "team_peers")
-        self.server_peer = getattr(settings, "server_peer")
+        self.blockchain_community_ready = getattr(settings, "blockchain_community_ready")
         self.registration_complete = getattr(settings, "registration_complete")
+
+        self.server_peer = None
+        self.team_peers = dict()
+        # add our own peer
+        our_id = MEMBER_KEYS[pub_key(self.my_peer)]
+        self.team_peers[our_id] = self.my_peer
+
+        self.team_ready = []
 
         self.mempool = []
         self.txs_per_block = 0 # 0 first because it's the genesis block, this is later changed
@@ -162,12 +179,24 @@ class BlockchainCommunity(Community, PeerObserver):
         print("starting blockchain community")
         print("starting a peer listener")
         print("my key", pub_key(self.my_peer))
+        self.network.add_peer_observer(self)
         self.register_task("check_registration", self.check_registration, interval=0.5)
+        self.register_task("check_ready", self.check_ready, interval=1.5)
+        
 
 
         
 
+    def check_ready(self):
+        print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
+        # early return if readys are not recieved or server is not yet found
+        if len(self.team_ready) != 3:
+            return
+
+        print("READYS collected")
         
+        self.cancel_pending_task("check_ready")
+        self.blockchain_community_ready = True
 
     def check_registration(self):
         if not self.registration_complete:
@@ -180,6 +209,15 @@ class BlockchainCommunity(Community, PeerObserver):
     def on_peer_added(self, peer):
         print("Pkey ->", pub_key(peer, True))
 
+
+        if is_server(peer):
+            self.server_peer = peer
+
+        if is_teammate(peer):
+            self.handle_teammate(peer)
+
+        
+
         # TODO Find the server and the other 2 group members -> Danil
         # Then we can start
         # Q: Or can we start only knowing the server and not the other miners?
@@ -190,9 +228,16 @@ class BlockchainCommunity(Community, PeerObserver):
     def handle_teammate(self, peer):
         peer_id = MEMBER_KEYS[pub_key(peer)]
         self.team_peers[peer_id] = peer
+        if len(self.team_peers) == 3:
+            group_send(self, list(self.team_peers.values()), ReadyMessage(True))
         self.register_task(f"heartbeat_send_{peer_id}", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
 
+    @lazy_wrapper(ReadyMessage)
+    def on_ready(self, peer, payload: ReadyMessage):
+        if pub_key(peer) not in self.team_ready and pub_key(peer) in MEMBER_KEYS:
+            self.team_ready.append(pub_key(peer))
 
+    
     def send_heartbeat(self, peer: Peer):
         peer.ez_send(HeartbeatRequest(0))
 

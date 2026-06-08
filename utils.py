@@ -60,3 +60,6 @@ def is_leader(peer):
         return MEMBER_KEYS[pub_key(peer)] == LEADER_ID
     except Exception:
         return False
+
+def is_teammate(peer):
+    pub_key(peer) in list(MEMBER_KEYS.keys())
