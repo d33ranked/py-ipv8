@@ -118,6 +118,25 @@ class ReadyMessage(VariablePayload):
     format_list = ["?"]
     names = ["ready"]
 
+@vp_compile
+class NewBlock(VariablePayload):
+    msg_id = 100
+    
+    # format_list defines the byte-structure for each field
+    # Q = 64-bit unsigned int
+    # varlenH = variable length bytes (prefixed with 2-byte length)
+    # I = 32-bit unsigned int
+    format_list = ["Q", "varlenH", "varlenH", "Q", "I", "I", "varlenH"]
+    
+    names = [
+        "height",
+        "prev_hash",
+        "txs_hash",
+        "timestamp",
+        "difficulty",
+        "nonce",
+        "tx_hashes"
+    ]
 
 GENESIS_BLOCK = Block(
     BlockHeader(b"", hashlib.sha256(b"").digest(), b"", b"", b""),
@@ -135,7 +154,7 @@ class BlockchainCommunity(Community, PeerObserver):
     HEARTBEAT_TIMEOUT = 30
 
     # -- Rest of the varialbes here
-    community_id = bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
+    community_id = BLOCKCHAIN_COMMUNITY_ID
 
 
     def __init__(self, settings: CommunitySettings, *args, **kwargs):
@@ -174,6 +193,8 @@ class BlockchainCommunity(Community, PeerObserver):
         self.add_message_handler(HeartbeatRequest, self.on_heartbeat_request)
         self.add_message_handler(HeartbeatResponse, self.on_heartbeat_response)
 
+        self.add_message_handler(NewBlock, self.on_new_block)
+
 
     def started(self) -> None:
         print("starting blockchain community")
@@ -185,8 +206,8 @@ class BlockchainCommunity(Community, PeerObserver):
         
 
 
+    
         
-
     def check_ready(self):
         #print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
@@ -230,7 +251,7 @@ class BlockchainCommunity(Community, PeerObserver):
         self.team_peers[peer_id] = peer
         if len(self.team_peers) == 3:
             group_send(self, list(self.team_peers.values()), ReadyMessage(True))
-        self.register_task(f"heartbeat_send_{peer_id}", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
+        #self.register_task(f"heartbeat_send_{peer_id}", self.send_heartbeat, peer, interval=self.HEARTBEAT_INTERVAL)
 
     @lazy_wrapper(ReadyMessage)
     def on_ready(self, peer, payload: ReadyMessage):
@@ -255,7 +276,12 @@ class BlockchainCommunity(Community, PeerObserver):
 
         self.register_task(task_id, self.on_heartbeat_expired, peer, interval=self.HEARTBEAT_TIMEOUT)
         
+    @lazy_wrapper(NewBlock)
+    def on_new_block(self, peer, payload: NewBlock):
+        print(payload)
 
+
+            
     def on_heartbeat_expired(self, peer):
         # Log the warning using lazy evaluation
         logger.warning(f"heartbeat of {pub_key(peer)} expired, deleting peer.")
