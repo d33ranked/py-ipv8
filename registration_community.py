@@ -64,7 +64,7 @@ class RegistrationCommunity(Community, PeerObserver):
         self.network.add_peer_observer(self)
 
     def check_ready(self):
-        print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
+        # print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
         if not self.server_peer or len(self.team_ready) != 3 or not self.blockchain_community_ready:
             return

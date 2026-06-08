@@ -188,7 +188,7 @@ class BlockchainCommunity(Community, PeerObserver):
         
 
     def check_ready(self):
-        print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
+        #print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
         if len(self.team_ready) != 3:
             return
