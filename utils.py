@@ -61,4 +61,4 @@ def is_leader(peer):
         return False
 
 def is_teammate(peer):
-    pub_key(peer) in list(MEMBER_KEYS.keys())
+    return pub_key(peer) in list(MEMBER_KEYS.keys())

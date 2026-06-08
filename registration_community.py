@@ -43,13 +43,10 @@ class RegistrationCommunity(Community, PeerObserver):
     def __init__(self, settings: CommunitySettings):
         super().__init__(settings)
 
-        
-        self.blockchain_community_ready = getattr(settings, "blockchain_community_ready")
-        self.registration_complete = getattr(settings, "registration_complete")
+        #shared vars
+        self.server_peer = getattr(settings, "server_peer")
+        self.team_peers: dict = getattr(settings, "team_peers")
 
-        self.server_peer = None
-        self.team_peers = dict()
-        # add our own peer
         our_id = MEMBER_KEYS[pub_key(self.my_peer)]
         self.team_peers[our_id] = self.my_peer
         self.team_ready = []
@@ -66,7 +63,10 @@ class RegistrationCommunity(Community, PeerObserver):
     def check_ready(self):
         # print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
-        if not self.server_peer or len(self.team_ready) != 3 or not self.blockchain_community_ready:
+        print("speer: ", self.server_peer)
+        print("len ", len(self.team_ready))
+
+        if not self.server_peer or len(self.team_ready) != 3:
             return
 
         print("Registration Ready")
