@@ -46,25 +46,25 @@ async def start_communities():
         },
         [("started",)]
     )
-    # builder.add_overlay(    
-    #     "BlockchainCommunity",
-    #     UNI_EMAIL,
-    #     [
-    #         WalkerDefinition
-    #             (
-    #             Strategy.RandomWalk,
-    #             10,
-    #             {"timeout": 3.0}
+    builder.add_overlay(    
+        "BlockchainCommunity",
+        UNI_EMAIL,
+        [
+            WalkerDefinition
+                (
+                Strategy.RandomWalk,
+                10,
+                {"timeout": 3.0}
 
-    #         )
-    #     ],
-    #     default_bootstrap_defs,
-    #     {
+            )
+        ],
+        default_bootstrap_defs,
+        {
             
-    #     },
-    #     [("started",)]        
+        },
+        [("started",)]        
 
-    # )
+    )
 
 
     ipv8 = IPv8(

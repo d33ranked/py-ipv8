@@ -15,7 +15,7 @@ SERVER_PUB_KEY = "4c69624e61434c504b3ae3fc099fb56ca3b5e1de9a1c843387f2acdbb78b1b
 SERVER_PUB_KEY_SHA1 = hashlib.sha1(bytes.fromhex(SERVER_PUB_KEY))
 
 BLOCKCHAIN_COMMUNITY_ID = b"QuickFoxJumpsLazyDog"
-COMMUNITY_ID = "4c61623247726f75705369676e696e6732303236"
+COMMUNITY_ID = "4c616233426c6f636b636861696e323032365057"
 LEADER_ID = "1"
 PUBLIC_KEYS = {
     "1": "4c69624e61434c504b3aa3387dfd20b578dfce201978aea6f25dfa3b3127e6825ce7bd2fb8ce07797f7c8bf427fa376e6eaf58391430e63eb86dc93aebb3f68c89bc9d99c63882034a90",
@@ -64,6 +64,12 @@ def is_teammate(peer):
     return pub_key(peer) in list(MEMBER_KEYS.keys())
 
 def log_info(logger, peer):
+    peer_obj = {"peer_name": "UNKNOWN"}
     if is_server(peer):
-
-        logger.info("User logged in successfully", extra={"username": "Alice"})
+        peer_obj["peer_name"]="SERVER"
+    if is_teammate(peer):
+        peer_obj["peer_name"] ="TEAMMATE"
+    if is_leader(peer):
+        peer_obj["peer_name"] ="LEADER"
+        
+    logger.info("User logged in successfully", extra=peer_obj)

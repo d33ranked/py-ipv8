@@ -115,14 +115,6 @@ class HeartbeatResponse(VariablePayload):
     format_list = ["q"]
     names = ["default"]
 
-@vp_compile
-class ReadyMessage(VariablePayload):
-    """
-    Message which appears from a peer if all team mate peers have been discovered
-    """
-    msg_id = 10
-    format_list = ["?"]
-    names = ["ready"]
 
 @vp_compile
 class NewBlock(VariablePayload):
@@ -197,8 +189,6 @@ class BlockchainCommunity(Community, PeerObserver):
         self.add_message_handler(HeartbeatResponse, self.on_heartbeat_response)
 
         self.add_message_handler(NewBlock, self.on_new_block)
-        self.add_message_handler(ReadyMessage, self.on_ready)
-
 
     def started(self) -> None:
         print("Starting blockchain community")
@@ -216,11 +206,6 @@ class BlockchainCommunity(Community, PeerObserver):
     def on_peer_removed(self, peer):
         super().on_peer_removed(peer)
     
-
-    @lazy_wrapper(ReadyMessage)
-    def on_ready(self, peer, payload: ReadyMessage):
-        if pub_key(peer) not in self.team_ready and pub_key(peer) in MEMBER_KEYS:
-            self.team_ready.append(pub_key(peer))
 
     
     def send_heartbeat(self, peer: Peer):
