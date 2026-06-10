@@ -12,6 +12,8 @@ from ipv8.peer import Peer
 from ipv8.peerdiscovery.network import PeerObserver
 from ipv8.requestcache import RandomNumberCacheWithName, RequestCache
 
+
+
 from dotenv import load_dotenv
 
 from utils import *
@@ -44,7 +46,7 @@ class BlockHeader:
 class Block:
     header: BlockHeader
     block_hash: bytes
-    tx_hashes: bytes
+    tx_hashes: tuple[bytes]
     n_txs: int
 
 
@@ -170,7 +172,7 @@ class BlockchainCommunity(Community, PeerObserver):
 
         self.team_ready = []
 
-        self.mempool = []
+        self.mempool = dict()
         self.txs_per_block = 0 # 0 first because it's the genesis block, this is later changed
 
         # Q: Should the chain be saved and loaded from disk?
@@ -178,7 +180,7 @@ class BlockchainCommunity(Community, PeerObserver):
         # the idea is that the chain would only be kept alive in an actual blockchain by at least one living peer.
         # Could be a cool extension idea though.
 
-        self.blockchain = []
+        self.blockchain = [GENESIS_BLOCK]
         self.next_block = GENESIS_BLOCK
 
         # Register the handler for the server's response
@@ -277,7 +279,7 @@ class BlockchainCommunity(Community, PeerObserver):
 
                 self.blockchain.append(self.next_block)
 
-                for tx in self.mempool:
+                for tx in self.mempool.values():
                     if tx.hash in self.next_block.tx_hashes:
                         tx.status = "IN-MINED-BLOCK" # Or, could delete, but need to be careful because maybe the final chain will not have it
 
@@ -292,8 +294,8 @@ class BlockchainCommunity(Community, PeerObserver):
                     tx_hash=self.next_block.tx_hashes
                 )
 
-                # TODO Tell my peers that I mined it -> Danil
-
+                
+                group_send(self, self.team_peers.values(), block_mined_res)
                 self.next_block = self.gen_next_block()
 
             nonce += 1
@@ -325,16 +327,8 @@ class BlockchainCommunity(Community, PeerObserver):
         if is_valid:
             print("✓ Valid signature")
             tx = Transaction(pk_bytes, data_bytes, timestamp_bytes, sig_bytes, hash, "IN-POOL")
-            self.mempool.append(tx)
-
-            if self.next_block.n_txs < self.txs_per_block:
-                tx.status = "IN-PENDING-BLOCK"
-                self.next_block.tx_hashes += hash
-                self.next_block.n_txs += 1
-
-                if self.next_block.n_txs == self.txs_per_block:
-                    task = asyncio.create_task(self.mine_block()) # TODO Not sure about this
-
+            self.mempool[hash] = tx
+            
             response = SubmitTransactionResponse(success=True, tx_hash=hash, message="Added transaction to pool")
         else:
             print("✗ Invalid signature")
@@ -365,7 +359,7 @@ class BlockchainCommunity(Community, PeerObserver):
 
         block = self.blockchain[height]
         response = BlockResponse(
-            height = block.header.height,
+            height = height,
             prev_hash = block.header.prev_hash,
             txs_hash = block.header.txs_hash,
             timestamp = block.header.timestamp,
@@ -392,15 +386,12 @@ class BlockchainCommunity(Community, PeerObserver):
 
 
     # Helper functions
-    def send_to_peers(self, payload):
-        [self.ez_send(peer, payload) for peer in self.submission_peers]
-
     def gen_next_block(self):
         tx_hashes = b""
         n_txs = 0
 
         # Add txs from mempool
-        for tx in self.mempool:
+        for tx in self.mempool.values():
             if n_txs >= self.txs_per_block:
                 break
 

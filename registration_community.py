@@ -95,7 +95,7 @@ class RegistrationCommunity(Community, PeerObserver):
     def send_register(self, peer: Peer):
         self.ez_send(peer, Register(
             GROUP_ID,
-            bytes.fromhex(BLOCKCHAIN_COMMUNITY_ID)
+            BLOCKCHAIN_COMMUNITY_ID
         ))
 
     @lazy_wrapper(RegisterResponse)
