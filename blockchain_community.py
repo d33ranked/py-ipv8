@@ -23,6 +23,10 @@ load_dotenv()
 import logging
 
 # Create a logger specific to this file/module
+logging.basicConfig(
+    format="[BLOCKCHAIN] - ",
+    level=logging.INFO,
+)
 logger = logging.getLogger(__name__)
 
 @dataclass
@@ -163,9 +167,8 @@ class BlockchainCommunity(Community, PeerObserver):
         super().__init__(settings, *args, **kwargs)
 
         #shared vars
-        self.server_peer = getattr(settings, "server_peer")
-        self.team_peers = getattr(settings, "team_peers")
-
+        self.server_peer: None | Peer = getattr(settings, "server_peer", None)
+        self.team_peers: dict[str, Peer] = getattr(settings, "team_peers", {})
         # add our own peer
         our_id = MEMBER_KEYS[pub_key(self.my_peer)]
         self.team_peers[our_id] = self.my_peer
@@ -198,30 +201,20 @@ class BlockchainCommunity(Community, PeerObserver):
 
 
     def started(self) -> None:
-        print("starting blockchain community")
-        print("starting a peer listener")
-        print("my key", pub_key(self.my_peer))
+        print("Starting blockchain community")
+        print("Starting a peer listener")
+        print("My peer key: ", pub_key(self.my_peer, True))
         self.network.add_peer_observer(self)
 
         
 
     def on_peer_added(self, peer):
         super().on_peer_added(peer)
-        print("Pkey ->", pub_key(peer, True))
 
-
-
-    # here we register a task which will be monitor heartbeats.
-    def handle_teammate(self, peer):
-        peer_id = MEMBER_KEYS[pub_key(peer)]
-        self.team_peers[peer_id] = peer
-        print("team_peers: ", self.team_peers)
-        if len(self.team_peers) == 3:
-            group_send(self, list(self.team_peers.values()), ReadyMessage(True))
 
 
     def on_peer_removed(self, peer):
-        return super().on_peer_removed(peer)
+        super().on_peer_removed(peer)
     
 
     @lazy_wrapper(ReadyMessage)

@@ -62,3 +62,8 @@ def is_leader(peer):
 
 def is_teammate(peer):
     return pub_key(peer) in list(MEMBER_KEYS.keys())
+
+def log_info(logger, peer):
+    if is_server(peer):
+
+        logger.info("User logged in successfully", extra={"username": "Alice"})

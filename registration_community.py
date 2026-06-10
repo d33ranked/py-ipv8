@@ -6,6 +6,17 @@ from ipv8.peerdiscovery.network import PeerObserver
 
 from utils import *
 
+import logging
+
+# Create a logger specific to this file/module
+logging.basicConfig(
+    format="(REGISTRATION):[%(peer_name)s] - %(message)s",
+    level=logging.INFO,
+)
+logger = logging.getLogger(__name__)
+
+
+
 
 @vp_compile
 class Register(VariablePayload):
@@ -44,14 +55,15 @@ class RegistrationCommunity(Community, PeerObserver):
         super().__init__(settings)
 
         #shared vars
-        self.server_peer = getattr(settings, "server_peer")
-        self.team_peers: dict = getattr(settings, "team_peers")
+        self.server_peer: None | Peer = getattr(settings, "server_peer", None)
+        self.team_peers: dict[str, Peer] = getattr(settings, "team_peers", {})
 
         our_id = MEMBER_KEYS[pub_key(self.my_peer)]
         self.team_peers[our_id] = self.my_peer
         self.team_ready = []
         self.all_ready = False
         # Register the handler for the server's response
+        self.add_message_handler(Register, self.on_register)
         self.add_message_handler(RegisterResponse, self.handle_regestration_response)  
         self.add_message_handler(ReadyMessage, self.on_ready)
 
@@ -59,23 +71,36 @@ class RegistrationCommunity(Community, PeerObserver):
         print("Started Registration Community.")
         self.register_task("check_ready", self.check_ready, interval=2.0)
         self.network.add_peer_observer(self)
+        
+    # for testing only
+    @lazy_wrapper(Register)
+    def on_register(self, peer, payload: Register):
+        self.ez_send(peer, RegisterResponse(
+            success=False,
+            message="I am not the server"
+        ))
 
+    # main task responsible for checking "READY" state of the peers
     def check_ready(self):
         # print("READYS: ", [MEMBER_KEYS[ready] for ready in self.team_ready])
         # early return if readys are not recieved or server is not yet found
-        print("speer: ", self.server_peer)
-        print("len ", len(self.team_ready))
+        print("server_peer: ", self.server_peer)
+        print("team_len: ", len(self.team_ready))
+
+        if len(self.team_peers) == 3:
+            group_send(self, self.team_peers.values(), ReadyMessage(True))
 
         if not self.server_peer or len(self.team_ready) != 3:
             return
 
         print("Registration Ready")
-        
-
         if is_leader(self.my_peer):
+
             print("SENDING REGISTRATION REQUEST")
             self.send_register(self.server_peer)
+        # destruct task check_ready after the registration request is sent
         self.cancel_pending_task("check_ready")
+        
 
     def on_peer_added(self, peer):
         print("peer added: ", peer)
@@ -83,9 +108,11 @@ class RegistrationCommunity(Community, PeerObserver):
 
         if is_server(peer):
             self.server_peer = peer
+            
 
         if is_teammate(peer):
             self.handle_teammate(peer)
+            
 
 
     def on_peer_removed(self, peer):
@@ -105,6 +132,7 @@ class RegistrationCommunity(Community, PeerObserver):
 
         print(f"[SERVER] msg: {payload.message}")
         self.registration_complete = True
+        self.cancel_pending_task("check_ready")
 
     @lazy_wrapper(ReadyMessage)
     def on_ready(self, peer, payload: ReadyMessage):
